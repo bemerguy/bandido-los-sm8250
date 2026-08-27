@@ -393,10 +393,7 @@ static inline int __sec_log_buf_prepare(void)
 {
 	pr_info("printk virtual addrs phy=%pa\n", &sec_log_paddr);
 
-	if (sec_debug_is_enabled())
-		s_log_buf = ioremap_wc(sec_log_paddr, sec_log_size);
-	else
-		s_log_buf = ioremap_cache(sec_log_paddr, sec_log_size);
+	s_log_buf = ioremap_wc(sec_log_paddr, sec_log_size);
 
 	if (!s_log_buf) {
 		pr_err("failed to ioremap log region\n");
