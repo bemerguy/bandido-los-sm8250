@@ -139,7 +139,9 @@ static int glink_ssr_ssr_cb(struct notifier_block *this,
 		strlcpy(msg.name, nb->glink_label, sizeof(msg.name));
 
 		GLINK_INFO("%s: notify of %s seq_num:%d\n",
-			   dev->parent->of_node->name, nb->glink_label,
+			   (dev->parent && dev->parent->of_node) ?
+			   dev->parent->of_node->name : dev_name(dev),
+			   nb->glink_label,
 			   ssr->seq_num);
 
 		ret = rpmsg_send(ssr->ept, &msg, sizeof(msg));
@@ -186,7 +188,9 @@ static int glink_ssr_callback(struct rpmsg_device *rpdev,
 
 	complete(&ssr->completion);
 
-	GLINK_INFO("%s: received seq_num:%d\n", ssr->dev->parent->of_node->name,
+	GLINK_INFO("%s: received seq_num:%d\n",
+		   (ssr->dev->parent && ssr->dev->parent->of_node) ?
+		   ssr->dev->parent->of_node->name : dev_name(ssr->dev),
 		   le32_to_cpu(msg->seq_num));
 
 	return 0;
