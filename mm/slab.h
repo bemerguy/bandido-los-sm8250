@@ -171,7 +171,6 @@ bool __kmem_cache_empty(struct kmem_cache *);
 int __kmem_cache_shutdown(struct kmem_cache *);
 void __kmem_cache_release(struct kmem_cache *);
 int __kmem_cache_shrink(struct kmem_cache *);
-void __kmemcg_cache_deactivate(struct kmem_cache *s);
 void slab_kmem_cache_release(struct kmem_cache *);
 
 struct seq_file;
@@ -296,6 +295,7 @@ extern void slab_init_memcg_params(struct kmem_cache *);
 extern void memcg_link_cache(struct kmem_cache *s);
 extern void slab_deactivate_memcg_cache_rcu_sched(struct kmem_cache *s,
 				void (*deact_fn)(struct kmem_cache *));
+void __kmemcg_cache_deactivate(struct kmem_cache *s);
 
 #else /* CONFIG_MEMCG_KMEM */
 
@@ -349,6 +349,10 @@ static inline void slab_init_memcg_params(struct kmem_cache *s)
 }
 
 static inline void memcg_link_cache(struct kmem_cache *s)
+{
+}
+
+static inline void __kmemcg_cache_deactivate(struct kmem_cache *s)
 {
 }
 
