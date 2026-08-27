@@ -4193,7 +4193,7 @@ int __kmem_cache_shrink(struct kmem_cache *s)
 	return ret;
 }
 
-#ifdef CONFIG_MEMCG_KMEM
+#ifdef CONFIG_MEMCG
 static void kmemcg_cache_deact_after_rcu(struct kmem_cache *s)
 {
 	/*
@@ -5744,7 +5744,7 @@ static ssize_t slab_attr_store(struct kobject *kobj,
 
 static void memcg_propagate_slab_attrs(struct kmem_cache *s)
 {
-#ifdef CONFIG_MEMCG_KMEM
+#ifdef CONFIG_MEMCG
 	int i;
 	char *buffer = NULL;
 	struct kmem_cache *root_cache;

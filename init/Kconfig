@@ -937,12 +937,9 @@ config MEMCG_FORCE_USE_VM_SWAPPINESS
 	default y
 
 config MEMCG_KMEM
-	bool "Kernel memory accounting"
+	bool
 	depends on MEMCG && !SLOB
-	default n
-	help
-	  The Kernel memory accounting extension allows to charge kernel
-	  memory to the cgroup.
+	default y
 
 config BLK_CGROUP
 	bool "IO controller"
