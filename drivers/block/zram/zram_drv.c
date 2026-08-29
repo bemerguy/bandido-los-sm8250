@@ -3166,7 +3166,7 @@ static ssize_t disksize_store(struct device *dev,
 	if (!disksize)
 		return -EINVAL;
 
-//	disksize = SZ_8G;
+	disksize = SZ_8G;
 
 	down_write(&zram->init_lock);
 	if (init_done(zram)) {
