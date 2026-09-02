@@ -4091,13 +4091,8 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
 
 	free_mm_walk(walk);
 done:
-	if (!success) {
-		if (!current_is_kswapd() && !sc->priority)
-			wait_event_killable(lruvec->mm_state.wait,
-					    max_seq < READ_ONCE(lrugen->max_seq));
-
+	if (!success)
 		return max_seq < READ_ONCE(lrugen->max_seq);
-	}
 
 	VM_BUG_ON(max_seq != READ_ONCE(lrugen->max_seq));
 
