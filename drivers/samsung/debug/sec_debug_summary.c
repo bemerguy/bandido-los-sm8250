@@ -469,6 +469,11 @@ static void *get_wdog_regsave_paddr(void)
 {
 	return (void *)__pa(&(msm_dump_info_cached.cpu_buf_paddr));
 }
+#else
+static inline void *get_wdog_regsave_paddr(void)
+{
+	return NULL;
+}
 #endif
 
 static void __init summary_init_core_reg(void)
