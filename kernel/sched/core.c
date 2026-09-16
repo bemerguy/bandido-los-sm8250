@@ -1408,8 +1408,10 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 			p->ui_queued = true;
 			rq->nr_ui_running++;
 		}
-	} else {
+	} else if (p->ui_queued) {
 		p->ui_queued = false;
+		if (rq->nr_ui_running > 0)
+			rq->nr_ui_running--;
 	}
 #endif
 
@@ -2981,6 +2983,9 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 	p->boost_period			= 0;
 #ifdef CONFIG_SCHED_WALT
 	p->low_latency			= 0;
+#endif
+#ifdef CONFIG_BANDIDO_UI_BOOST
+	p->ui_queued			= false;
 #endif
 	INIT_LIST_HEAD(&p->se.group_node);
 
