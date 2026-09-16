@@ -11,7 +11,7 @@ export LLVM=1 LLVM_IAS=1
 
 #setting toolchain path
 ROOT_DIR="/home/me/kernelupgrade"
-TC_DIR="$ROOT_DIR/toolchains/llvm-23.1.0-rc3-x86_64"
+TC_DIR="$ROOT_DIR/toolchains/llvm-23.1.0-x86_64"
 export PATH="$TC_DIR/bin:$PATH"
 
 ##########################################################
@@ -151,6 +151,9 @@ if [[ -f "$IMAGE" ]]; then
 	while ! adb shell "twrp help 2>&1 || fox help 2>&1" | grep -qE "TWRP|OrangeFox"; do
 		sleep 2
 	done
+	
+	echo "Allowing TWRP to stabilize..."
+	sleep 5
 
 	echo "Pushing kernel zip to device..."
 	PUSH_SUCCESS=0
@@ -169,16 +172,34 @@ if [[ -f "$IMAGE" ]]; then
 
 	echo "Installing kernel via TWRP/OrangeFox..."
 	INSTALL_LOG=$(mktemp)
-	adb shell "twrp install /tmp/$KERNELZIP" 2>&1 | tee "$INSTALL_LOG"
-	if grep -qE "Error installing|Unable to locate|Failed" "$INSTALL_LOG"; then
-		rm -f "$INSTALL_LOG"
-		echo "ERROR: Failed to install kernel via TWRP/OrangeFox!"
+	
+	# Try installing up to 3 times in case of silent failure
+	INSTALL_SUCCESS=0
+	for i in {1..3}; do
+		adb shell "twrp install /tmp/$KERNELZIP" 2>&1 | tee "$INSTALL_LOG"
+		
+		# Check if it failed or if the output was completely empty (silent failure)
+		if grep -qE "Error installing|Unable to locate|Failed" "$INSTALL_LOG"; then
+			echo "Installation failed, retrying ($i/3)..."
+			sleep 3
+		elif [ ! -s "$INSTALL_LOG" ] || ! grep -q "Done" "$INSTALL_LOG"; then
+			echo "Silent failure (TWRP busy?), retrying ($i/3)..."
+			sleep 3
+		else
+			INSTALL_SUCCESS=1
+			break
+		fi
+	done
+	
+	rm -f "$INSTALL_LOG"
+	
+	if [[ $INSTALL_SUCCESS -ne 1 ]]; then
+		echo "ERROR: Failed to install kernel via TWRP/OrangeFox after 3 attempts!"
 		exit 1
 	fi
-	rm -f "$INSTALL_LOG"
 	echo -e "\a"
 	echo "Installation completed! Rebooting to system..."
-	sleep 2
+	sleep 5
 	adb shell "twrp reboot"
 else
 	echo -e "\nERROR. Something broke along the way since $IMAGE is not there\n"
