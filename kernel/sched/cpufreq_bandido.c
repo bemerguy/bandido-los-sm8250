@@ -559,10 +559,50 @@ static ssize_t rtg_boost_freq_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
+static ssize_t boost_status_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_policy *sg_policy;
+	ssize_t count = 0;
+	u64 now = ktime_get_ns();
+
+	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook) {
+		struct cpufreq_policy *policy = sg_policy->policy;
+		unsigned int cpu;
+
+		count += scnprintf(buf + count, PAGE_SIZE - count,
+				   "Policy%u (cur: %u kHz, rtg_boost_util: %lu):\n",
+				   policy->cpu, policy->cur, sg_policy->rtg_boost_util);
+
+		for_each_cpu(cpu, policy->cpus) {
+			struct rq *rq = cpu_rq(cpu);
+			struct sugov_cpu *sg_cpu = &per_cpu(sugov_cpu, cpu);
+			bool rtg_act = sugov_rtg_boost_active(sg_cpu);
+			bool ui_act = sugov_ui_active(sg_cpu, now);
+			int st_boost = schedtune_cpu_boost_with(cpu, NULL);
+
+			count += scnprintf(buf + count, PAGE_SIZE - count,
+					   "  CPU%u: nr_ui=%u curr='%s' (ui=%d) rtg_act=%d ui_act=%d st_boost=%d\n",
+					   cpu,
+#ifdef CONFIG_BANDIDO_UI_BOOST
+					   rq->nr_ui_running,
+#else
+					   0,
+#endif
+					   rq->curr ? rq->curr->comm : "none",
+					   rq->curr ? is_ui_thread(rq->curr) : 0,
+					   rtg_act, ui_act, st_boost);
+		}
+	}
+
+	return count;
+}
+
 static struct governor_attr rtg_boost_freq = __ATTR_RW(rtg_boost_freq);
+static struct governor_attr boost_status = __ATTR_RO(boost_status);
 
 static struct attribute *sugov_attributes[] = {
 	&rtg_boost_freq.attr,
+	&boost_status.attr,
 	NULL
 };
 
