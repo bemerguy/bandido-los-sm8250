@@ -601,6 +601,7 @@ extern void free_task_load_ptrs(struct task_struct *p);
 extern void sched_set_refresh_rate(enum fps fps);
 extern bool display_is_120hz(void);
 extern void sched_update_is_ui(struct task_struct *p);
+extern void schedtune_update_task_group(struct task_struct *p);
 
 #define RAVG_HIST_SIZE_MAX 5
 #define NUM_BUSY_BUCKETS 10

@@ -1318,6 +1318,10 @@ void __set_task_comm(struct task_struct *tsk, const char *buf, bool exec)
 #ifdef CONFIG_SCHED_WALT
 	sched_update_is_ui(tsk);
 #endif
+#ifdef CONFIG_SCHED_TUNE
+	if (buf[0] == 'c' && !strcmp(buf, "cameraserver"))
+		schedtune_update_task_group(tsk);
+#endif
 	task_unlock(tsk);
 	perf_event_comm(tsk, exec);
 }

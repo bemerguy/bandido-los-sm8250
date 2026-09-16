@@ -539,31 +539,23 @@ int schedtune_cpu_boost_with(int cpu, struct task_struct *p)
 	return max(bg->boost_max, task_boost);
 }
 
-/*
- * Additional boost applied to known UI rendering threads.
- * These threads directly determine frame delivery latency.
- * Applied on top of the cgroup boost, capped at 100.
- */
-#define SCHEDTUNE_UI_THREAD_BOOST_BONUS 25
-
 extern bool lcd_is_on;
 
 int schedtune_task_boost(struct task_struct *p)
 {
 	struct schedtune *st;
 	int task_boost;
-	bool is_colocate = false;
 
 	if (unlikely(!schedtune_initialized))
+		return 0;
+
+	if (unlikely(p->comm[0] == 'c' && !strcmp(p->comm, "cameraserver")))
 		return 0;
 
 	/* Get task boost value */
 	rcu_read_lock();
 	st = task_schedtune(p);
 	task_boost = st->boost;
-#ifdef CONFIG_SCHED_WALT
-	is_colocate = st->colocate;
-#endif
 	rcu_read_unlock();
 
 #if defined(CONFIG_SCHED_WALT) && defined(CONFIG_BANDIDO_SCHED_UI_PLACEMENT)
@@ -573,12 +565,8 @@ int schedtune_task_boost(struct task_struct *p)
 	 * cgroup they currently reside in (top-app membership is transient).
 	 * Only applied when the screen is on to save battery.
 	 */
-	if (lcd_is_on && task_boost < 100) {
-		if (is_ui_thread(p))
-			task_boost = min(100, task_boost + 20); /* 20% boost for critical UI/Input threads */
-		else if (is_colocate && p->pid == p->tgid)
-			task_boost = min(100, task_boost + SCHEDTUNE_UI_THREAD_BOOST_BONUS);
-	}
+	if (lcd_is_on && task_boost < 100 && is_ui_thread(p))
+		task_boost = min(100, task_boost + 20); /* 20% boost for critical UI/Input threads */
 #endif
 
 	return task_boost;
@@ -589,29 +577,27 @@ bool is_top_app_main_thread(struct task_struct *p)
 	if (unlikely(!p || p->pid != p->tgid))
 		return false;
 
+	if (unlikely(p->comm[0] == 'c' && !strcmp(p->comm, "cameraserver")))
+		return false;
+
+#ifdef CONFIG_CGROUP_SCHED
+	/* Android 14/15/16+ path (cpuctl/cgroups) */
+	if (task_group(p)->is_top_app)
+		return true;
+#endif
+
 #ifdef CONFIG_SCHED_TUNE
 	/* Android 13 path (SchedTune) */
 	if (schedtune_initialized) {
 		struct schedtune *st;
-		bool is_colocate = false;
+		bool colocate;
 
 		rcu_read_lock();
 		st = task_schedtune(p);
-		if (st)
-			is_colocate = st->colocate;
+		colocate = st && st->colocate;
 		rcu_read_unlock();
 
-		if (is_colocate)
-			return true;
-	}
-#endif
-
-#ifdef CONFIG_CGROUP_SCHED
-	/* Android 14/15/16+ path (cpuctl/cgroups) */
-	{
-		struct task_group *tg = task_group(p);
-		if (tg && tg->is_top_app)
-			return true;
+		return colocate;
 	}
 #endif
 
@@ -744,6 +730,38 @@ static void schedtune_attach(struct cgroup_taskset *tset)
 		raw_spin_unlock(&bg->lock);
 		task_rq_unlock(rq, task, &rq_flags);
 	}
+}
+
+void schedtune_update_task_group(struct task_struct *task)
+{
+	struct rq_flags rq_flags;
+	struct rq *rq;
+	int cpu, src_idx, dst_idx;
+	struct boost_groups *bg;
+
+	if (unlikely(!schedtune_initialized))
+		return;
+
+	rq = task_rq_lock(task, &rq_flags);
+	cpu = cpu_of(rq);
+	bg = &per_cpu(cpu_boost_groups, cpu);
+	raw_spin_lock(&bg->lock);
+
+	src_idx = task->stune_idx;
+	dst_idx = 0;
+
+	if (src_idx != dst_idx) {
+		task->stune_idx = dst_idx;
+		if (task_on_rq_queued(task)) {
+			int tasks = bg->group[src_idx].tasks - 1;
+			bg->group[src_idx].tasks = max(0, tasks);
+			bg->group[dst_idx].tasks += 1;
+			schedtune_cpu_update(cpu, sched_clock_cpu(cpu));
+		}
+	}
+
+	raw_spin_unlock(&bg->lock);
+	task_rq_unlock(rq, task, &rq_flags);
 }
 
 static int
