@@ -1731,27 +1731,6 @@ restart:
 			goto out_free;
 	}
 
-	/* Bandido Kernel: Quiet Mode - Robustly Drop Verbose, Debug, Info and Warn logs */
-	if (len >= 12 && other) {
-		uid_t duid = from_kuid(&init_user_ns, sock_i_uid(other));
-		if (duid == 1036 || duid == 0) {
-			unsigned char hdr[12];
-			/* [1b LogID][2b TID][4b Sec][4b NSec][1b Priority] = 12 bytes total */
-			if (skb_copy_bits(skb, 0, hdr, 12) == 0) {
-				unsigned char log_id = hdr[0];
-				unsigned char priority = hdr[11];
-
-				/* Sanity check: valid Log ID (0-7) and priority (2-8) */
-				if (log_id <= 7 && priority >= 2 && priority <= 8) {
-					if (priority < 6) { /* 2=V, 3=D, 4=I, 5=W */
-						err = len;
-						goto out_free;
-					}
-				}
-			}
-		}
-	}
-
 	if (sk_filter(other, skb) < 0) {
 		/* Toss the packet but do not return any error to the sender */
 		err = len;
