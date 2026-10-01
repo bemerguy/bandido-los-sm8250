@@ -4172,8 +4172,7 @@ static long get_nr_evictable(struct lruvec *lruvec, unsigned long max_seq,
 	return total > 0 ? total : 0;
 }
 
-static bool age_lruvec(struct lruvec *lruvec, struct scan_control *sc,
-		       unsigned long min_ttl)
+static void age_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 {
 	bool need_aging;
 	long nr_to_scan;
@@ -4183,20 +4182,12 @@ static bool age_lruvec(struct lruvec *lruvec, struct scan_control *sc,
 	DEFINE_MAX_SEQ(lruvec);
 	DEFINE_MIN_SEQ(lruvec);
 
-	if (min_ttl) {
-		int gen = lru_gen_from_seq(min_seq[LRU_GEN_FILE]);
-		unsigned long birth = READ_ONCE(lruvec->lrugen.timestamps[gen]);
-
-		if (time_is_after_jiffies(birth + min_ttl))
-			return false;
-	}
-
 	if (prot == MEMCG_PROT_MIN)
-		return false;
+		return;
 
 	nr_to_scan = get_nr_evictable(lruvec, max_seq, min_seq, swappiness, &need_aging);
 	if (!nr_to_scan)
-		return false;
+		return;
 
 	nr_to_scan >>= sc->priority;
 
@@ -4205,19 +4196,11 @@ static bool age_lruvec(struct lruvec *lruvec, struct scan_control *sc,
 
 	if (nr_to_scan && need_aging && (prot != MEMCG_PROT_LOW || sc->memcg_low_reclaim))
 		try_to_inc_max_seq(lruvec, max_seq, sc, swappiness, false);
-
-	return true;
 }
-
-/* to protect the working set of the last N jiffies */
-#define LRU_GEN_MIN_TTL_MSECS	5000
-static unsigned long lru_gen_min_ttl __read_mostly;
 
 static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc)
 {
 	struct mem_cgroup *memcg;
-	bool success = false;
-	unsigned long min_ttl = READ_ONCE(lru_gen_min_ttl);
 
 	VM_BUG_ON(!current_is_kswapd());
 
@@ -4243,29 +4226,12 @@ static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc)
 	do {
 		struct lruvec *lruvec = mem_cgroup_lruvec(pgdat, memcg);
 
-		if (age_lruvec(lruvec, sc, min_ttl))
-			success = true;
+		age_lruvec(lruvec, sc);
 
 		cond_resched();
 	} while ((memcg = mem_cgroup_iter(NULL, memcg, NULL)));
 
 	current->reclaim_state->mm_walk = NULL;
-
-	/*
-	 * The main goal is to OOM kill if every generation from all memcgs is
-	 * younger than min_ttl. However, another theoretical possibility is all
-	 * memcgs are either below min or empty.
-	 */
-	if (!success && mutex_trylock(&oom_lock)) {
-		struct oom_control oc = {
-			.gfp_mask = sc->gfp_mask,
-			.order = sc->order,
-		};
-
-		out_of_memory(&oc);
-
-		mutex_unlock(&oom_lock);
-	}
 }
 
 /*
@@ -4483,13 +4449,6 @@ static bool sort_page(struct lruvec *lruvec, struct page *page, struct scan_cont
 static bool isolate_page(struct lruvec *lruvec, struct page *page, struct scan_control *sc)
 {
 	bool success;
-
-	if (!sc->may_unmap && page_mapped(page))
-		return false;
-
-	if (!(sc->may_writepage && (sc->gfp_mask & __GFP_IO)) &&
-	    (PageDirty(page) || (PageAnon(page) && !PageSwapCache(page))))
-		return false;
 
 	if (!get_page_unless_zero(page))
 		return false;
@@ -4989,32 +4948,6 @@ unlock:
 	cgroup_unlock();
 }
 
-/******************************************************************************
- *                          sysfs interface
- ******************************************************************************/
-
-static ssize_t show_min_ttl(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%u\n", jiffies_to_msecs(READ_ONCE(lru_gen_min_ttl)));
-}
-
-static ssize_t store_min_ttl(struct kobject *kobj, struct kobj_attribute *attr,
-			     const char *buf, size_t len)
-{
-	unsigned int msecs;
-
-	if (kstrtouint(buf, 0, &msecs))
-		return -EINVAL;
-
-	WRITE_ONCE(lru_gen_min_ttl, msecs_to_jiffies(msecs));
-
-	return len;
-}
-
-static struct kobj_attribute lru_gen_min_ttl_attr = __ATTR(
-	min_ttl_ms, 0644, show_min_ttl, store_min_ttl
-);
-
 static ssize_t show_enable(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	unsigned int caps = 0;
@@ -5063,7 +4996,6 @@ static struct kobj_attribute lru_gen_enabled_attr = __ATTR(
 );
 
 static struct attribute *lru_gen_attrs[] = {
-	&lru_gen_min_ttl_attr.attr,
 	&lru_gen_enabled_attr.attr,
 	NULL
 };
@@ -5474,8 +5406,6 @@ static int __init init_lru_gen(void)
 	BUILD_BUG_ON(BIT(LRU_GEN_WIDTH) <= MAX_NR_GENS);
 	BUILD_BUG_ON(sizeof(MM_STAT_CODES) != NR_MM_STATS + 1);
 
-	WRITE_ONCE(lru_gen_min_ttl, msecs_to_jiffies(LRU_GEN_MIN_TTL_MSECS));
-
 	if (sysfs_create_group(mm_kobj, &lru_gen_attr_group))
 		pr_err("lru_gen: failed to create sysfs group\n");
 
@@ -5881,14 +5811,6 @@ static bool shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 	} while (should_continue_reclaim(pgdat, sc->nr_reclaimed - nr_reclaimed,
 					 sc->nr_scanned - nr_scanned, sc));
 
-	/*
-	 * Kswapd gives up on balancing particular nodes after too
-	 * many failures to reclaim anything from them and goes to
-	 * sleep. On reclaim progress, reset the failure counter. A
-	 * successful direct reclaim run will revive a dormant kswapd.
-	 */
-	if (reclaimable)
-		pgdat->kswapd_failures = 0;
 
 	return reclaimable;
 }
@@ -6126,8 +6048,6 @@ static bool allow_direct_reclaim(pg_data_t *pgdat)
 	int i;
 	bool wmark_ok;
 
-	if (pgdat->kswapd_failures >= MAX_RECLAIM_RETRIES)
-		return true;
 
 	for (i = 0; i <= ZONE_NORMAL; i++) {
 		zone = &pgdat->node_zones[i];
@@ -6509,9 +6429,6 @@ static bool prepare_kswapd_sleep(pg_data_t *pgdat, int order, int classzone_idx)
 	if (waitqueue_active(&pgdat->pfmemalloc_wait))
 		wake_up_all(&pgdat->pfmemalloc_wait);
 
-	/* Hopeless node, leave it to direct reclaim */
-	if (pgdat->kswapd_failures >= MAX_RECLAIM_RETRIES)
-		return true;
 
 	if (pgdat_balanced(pgdat, order, classzone_idx)) {
 		clear_pgdat_congested(pgdat);
@@ -6744,8 +6661,8 @@ restart:
 			sc.priority--;
 	} while (sc.priority >= 1);
 
-	if (!sc.nr_reclaimed)
-		pgdat->kswapd_failures++;
+	if (!sc.nr_reclaimed && !pgdat_balanced(pgdat, order, classzone_idx))
+		schedule_timeout_interruptible(HZ / 20);
 
 out:
 	/* If reclaim was boosted, account for the reclaim done in this pass */
@@ -7005,10 +6922,8 @@ void wakeup_kswapd(struct zone *zone, gfp_t gfp_flags, int order,
 	if (!waitqueue_active(&pgdat->kswapd_wait))
 		return;
 
-	/* Hopeless node, leave it to direct reclaim if possible */
-	if (pgdat->kswapd_failures >= MAX_RECLAIM_RETRIES ||
-	    (pgdat_balanced(pgdat, order, classzone_idx) &&
-	     !pgdat_watermark_boosted(pgdat, classzone_idx))) {
+	if (pgdat_balanced(pgdat, order, classzone_idx) &&
+	    !pgdat_watermark_boosted(pgdat, classzone_idx)) {
 		/*
 		 * There may be plenty of free memory available, but it's too
 		 * fragmented for high-order allocations.  Wake up kcompactd
