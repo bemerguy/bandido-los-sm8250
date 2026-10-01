@@ -186,6 +186,7 @@ static inline void lru_gen_update_size(struct lruvec *lruvec, struct page *page,
 static inline bool lru_gen_add_page(struct lruvec *lruvec, struct page *page, bool reclaiming)
 {
 	int gen;
+	unsigned long seq;
 	unsigned long old_flags, new_flags;
 	int type = page_is_file_cache(page);
 	int zone = page_zonenum(page);
@@ -194,21 +195,28 @@ static inline bool lru_gen_add_page(struct lruvec *lruvec, struct page *page, bo
 	if (PageUnevictable(page) || !lrugen->enabled)
 		return false;
 	/*
-	 * There are three common cases for this page:
-	 * 1. If it's hot, e.g., freshly faulted in or previously hot and
-	 *    migrated, add it to the youngest generation.
-	 * 2. If it's cold but can't be evicted immediately, i.e., an anon page
-	 *    not in swapcache or a dirty page pending writeback, add it to the
-	 *    second oldest generation.
-	 * 3. Everything else (clean, cold) is added to the oldest generation.
+	 * There are four common cases for this page:
+	 * 1. If it's hot, i.e., freshly faulted in, add it to the youngest
+	 *    generation, and it's protected over the rest below.
+	 * 2. If it can't be evicted immediately, i.e., a dirty page pending
+	 *    writeback, add it to the second youngest generation.
+	 * 3. If it should be evicted first, e.g., cold and clean from
+	 *    rotate_reclaimable_page(), add it to the oldest generation.
+	 * 4. Everything else falls between 2 & 3 above and is added to the
+	 *    second oldest generation if it's considered inactive, or the
+	 *    oldest generation otherwise.
 	 */
 	if (PageActive(page))
-		gen = lru_gen_from_seq(lrugen->max_seq);
+		seq = lrugen->max_seq;
 	else if ((type == LRU_GEN_ANON && !PageSwapCache(page)) ||
 		 (PageReclaim(page) && (PageDirty(page) || PageWriteback(page))))
-		gen = lru_gen_from_seq(lrugen->min_seq[type] + 1);
+		seq = lrugen->max_seq - 1;
+	else if (reclaiming || lrugen->min_seq[type] + MIN_NR_GENS >= lrugen->max_seq)
+		seq = lrugen->min_seq[type];
 	else
-		gen = lru_gen_from_seq(lrugen->min_seq[type]);
+		seq = lrugen->min_seq[type] + 1;
+
+	gen = lru_gen_from_seq(seq);
 
 	do {
 		new_flags = old_flags = READ_ONCE(page->flags);
