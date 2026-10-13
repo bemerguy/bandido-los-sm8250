@@ -59,9 +59,6 @@
 #include <linux/buffer_head.h>
 #include <linux/page_ext.h>
 
-#ifdef CONFIG_KSU_SUSFS
-#include <linux/susfs.h>
-#endif
 #include <linux/debug_locks.h>
 #include <linux/debugobjects.h>
 #include <linux/lockdep.h>
@@ -821,9 +818,6 @@ asmlinkage __visible void __init start_kernel(void)
 	security_init();
 	dbg_late_init();
 	vfs_caches_init();
-#ifdef CONFIG_KSU_SUSFS
-	susfs_init();
-#endif
 	pagecache_init();
 	signals_init();
 	seq_file_init();

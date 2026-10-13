@@ -4,260 +4,240 @@
 #include <linux/version.h>
 #include <linux/types.h>
 #include <linux/utsname.h>
-#include <linux/mount.h>
+#include <linux/hashtable.h>
+#include <linux/path.h>
+#include <linux/susfs_def.h>
+#include <linux/statfs.h>
 
-#define SUSFS_VERSION "1.5.5"
-#define SUSFS_VARIANT "ksu"
+#define SUSFS_VERSION "v2.3.0"
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
+#define SUSFS_VARIANT "NON-GKI"
+#else
+#define SUSFS_VARIANT "GKI"
+#endif
 
-/* shared with userspace ksu_susfs tool */
-#define CMD_SUSFS_ADD_SUS_PATH 0x55555
-#define CMD_SUSFS_ADD_SUS_MOUNT 0x55556
-#define CMD_SUSFS_ADD_SUS_KSTAT 0x55558
-#define CMD_SUSFS_UPDATE_SUS_KSTAT 0x55559
-#define CMD_SUSFS_ADD_TRY_UMOUNT 0x5555a
-#define CMD_SUSFS_SET_UNAME 0x5555b
-#define CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY 0x5555c
-#define CMD_SUSFS_ENABLE_LOG 0x5555d
-#define CMD_SUSFS_ADD_SUS_MAPS_STATICALLY 0x5555e
-#define CMD_SUSFS_ADD_SUS_PROC_FD_LINK 0x5555f
-#define CMD_SUSFS_ADD_SUS_MAPS 0x55560
-#define CMD_SUSFS_UPDATE_SUS_MAPS 0x55561
-#define CMD_SUSFS_ADD_SUS_MEMFD 0x55562
-#define CMD_SUSFS_RUN_UMOUNT_FOR_CURRENT_MNT_NS 0x55563
-#define CMD_SUSFS_SHOW_VERSION 0x555e1
-#define CMD_SUSFS_SHOW_ENABLED_FEATURES 0x555e2
-#define CMD_SUSFS_SHOW_VARIANT 0x555e3
-
-#define DATA_ADB_UMOUNT_FOR_ZYGOTE_SYSTEM_PROCESS "/data/adb/susfs/umount_for_zygote_system_process"
-#define DATA_ADB_NO_AUTO_ADD_SUS_BIND_MOUNT "/data/adb/susfs/no_auto_add_sus_bind_mount"
-#define DATA_ADB_NO_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT "/data/adb/susfs/no_auto_add_sus_ksu_default_mount"
-#define DATA_ADB_NO_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT "/data/adb/susfs/no_auto_add_try_umount_for_bind_mount"
-
-#define SUSFS_MAX_LEN_PATHNAME 256 // 256 should address many paths already unless you are doing some strange experimental stuff, then set your own desired length
-#define SUSFS_MAX_LEN_MFD_NAME 248
-#define SUSFS_MAX_SUS_MNTS 300 // I think 300 is now enough? This includes the mount entries for each process and sus mounts added by user 
-#define SUSFS_MAX_SUS_MAPS 200 // I think 200 is now enough? Tell me why if you have over 200 entries
-
-#define SUSFS_MAP_FILES_ACTION_REMOVE_WRITE_PERM 1
-#define SUSFS_MAP_FILES_ACTION_HIDE_DENTRY 2
-
-/* non shared to userspace ksu_susfs tool */
-#define SYSCALL_FAMILY_ALL_ENOENT 0
-#define SYSCALL_FAMILY_OPENAT 1
-#define SYSCALL_FAMILY_MKNOD 2
-#define SYSCALL_FAMILY_MKDIRAT 3
-#define SYSCALL_FAMILY_RMDIR 4
-#define SYSCALL_FAMILY_UNLINKAT 5
-#define SYSCALL_FAMILY_SYMLINKAT_NEWNAME 6
-#define SYSCALL_FAMILY_LINKAT_OLDNAME 7
-#define SYSCALL_FAMILY_LINKAT_NEWNAME 8
-#define SYSCALL_FAMILY_RENAMEAT2_OLDNAME 9
-#define SYSCALL_FAMILY_RENAMEAT2_NEWNAME 10
-#define SYSCALL_FAMILY_TRUNCATE 11
-#define SYSCALL_FAMILY_FACCESSAT 12
-#define SYSCALL_FAMILY_CHDIR 13
-
-#define DEFAULT_SUS_MNT_ID 1000000
-#define DEFAULT_SUS_MNT_ID_FOR_KSU_PROC_UNSHARE 2000000
-
-#define INODE_STATE_SUS_PATH (1 << 24)
-#define INODE_STATE_OPEN_REDIRECT (1 << 25)
-#define INODE_STATE_SUS_KSTAT (1 << 26)
-#define INODE_STATE_SUS_MAP (1 << 27)
-
-#define TASK_STRUCT_NON_ROOT_USER_APP_PROC (1 << 0)
-#define TASK_STRUCT_KSU_PROC (1 << 1)
-#define TASK_STRUCT_ZYGOTE_PROC (1 << 2)
-
+/*********/
+/* MACRO */
+/*********/
 #define getname_safe(name) (name == NULL ? ERR_PTR(-EINVAL) : getname(name))
 #define putname_safe(name) (IS_ERR(name) ? NULL : putname(name))
 
-#define uid_matches_suspicious_path() (current_uid().val >= 2000)
-#define uid_matches_suspicious_kstat() (current_uid().val >= 2000)
-#define uid_matches_proc_need_to_reorder_mnt_id() (current_uid().val >= 10000)
+/********/
+/* ENUM */
+/********/
+enum UID_SCHEME {
+	UID_NON_APP_PROC = 0,
+	UID_ROOT_PROC_EXCEPT_SU_PROC,
+	UID_NON_SU_PROC,
+	UID_UMOUNTED_APP_PROC,
+	UID_UMOUNTED_PROC,
+};
 
+/**********/
+/* STRUCT */
+/**********/
+/* sus_path */
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 struct st_susfs_sus_path {
-	char                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	unsigned long           target_ino;
-};
-
-struct st_susfs_sus_mount {
-	char                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-};
-
-struct st_susfs_sus_kstat {
-	unsigned long           target_ino; // the ino after bind mounted or overlayed
-	char                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	char                    spoofed_pathname[SUSFS_MAX_LEN_PATHNAME];
-	unsigned long           spoofed_ino;
-	unsigned long           spoofed_dev;
-	unsigned int            spoofed_nlink;
-	long                    spoofed_atime_tv_sec;
-	long                    spoofed_mtime_tv_sec;
-	long                    spoofed_ctime_tv_sec;
-	long                    spoofed_atime_tv_nsec;
-	long                    spoofed_mtime_tv_nsec;
-	long                    spoofed_ctime_tv_nsec;
-};
-
-struct st_susfs_sus_maps {
-	bool                    is_statically;
-	int                     compare_mode;
-	bool                    is_isolated_entry;
-	bool                    is_file;
-	unsigned long           prev_target_ino;
-	unsigned long           next_target_ino;
-	char                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	unsigned long           target_ino;
-	unsigned long           target_dev;
-	unsigned long long      target_pgoff;
-	unsigned long           target_prot;
-	unsigned long           target_addr_size;
-	char                    spoofed_pathname[SUSFS_MAX_LEN_PATHNAME];
-	unsigned long           spoofed_ino;
-	unsigned long           spoofed_dev;
-	unsigned long long      spoofed_pgoff;
-	unsigned long           spoofed_prot;
-	bool                    need_to_spoof_pathname;
-	bool                    need_to_spoof_ino;
-	bool                    need_to_spoof_dev;
-	bool                    need_to_spoof_pgoff;
-	bool                    need_to_spoof_prot;
-};
-
-struct st_susfs_try_umount {
-	char                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	int                     mnt_mode;
-};
-
-struct st_susfs_sus_proc_fd_link {
-	char                    target_link_name[SUSFS_MAX_LEN_PATHNAME];
-	char                    spoofed_link_name[SUSFS_MAX_LEN_PATHNAME];
-};
-
-struct st_susfs_sus_memfd {
-	char                    target_pathname[SUSFS_MAX_LEN_MFD_NAME];
-};
-
-struct st_susfs_mnt_id_recorder {
-	int                     target_mnt_id[SUSFS_MAX_SUS_MNTS];
-	int                     spoofed_mnt_id[SUSFS_MAX_SUS_MNTS];
-	int                     spoofed_parent_mnt_id[SUSFS_MAX_SUS_MNTS];
-	int                     count;
+	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	int                                     err;
 };
 
 struct st_susfs_sus_path_list {
 	struct list_head                        list;
 	struct st_susfs_sus_path                info;
+	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+};
+#endif
+
+/* sus_mount */
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+struct st_susfs_hide_sus_mnts_for_non_su_procs {
+	bool                                    enabled;
+	int                                     err;
+};
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
+/* sus_kstat */
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+#define KSTAT_SPOOF_INO (1 << 0)
+#define KSTAT_SPOOF_DEV (1 << 1)
+#define KSTAT_SPOOF_NLINK (1 << 2)
+#define KSTAT_SPOOF_SIZE (1 << 3)
+#define KSTAT_SPOOF_ATIME_TV_SEC (1 << 4)
+#define KSTAT_SPOOF_ATIME_TV_NSEC (1 << 5)
+#define KSTAT_SPOOF_MTIME_TV_SEC (1 << 6)
+#define KSTAT_SPOOF_MTIME_TV_NSEC (1 << 7)
+#define KSTAT_SPOOF_CTIME_TV_SEC (1 << 8)
+#define KSTAT_SPOOF_CTIME_TV_NSEC (1 << 9)
+#define KSTAT_SPOOF_BLOCKS (1 << 10)
+#define KSTAT_SPOOF_BLKSIZE (1 << 11)
+
+struct st_susfs_sus_kstat {
+	bool                                    is_statically;
+	unsigned long                           target_ino;
+	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	unsigned long                           spoofed_ino;
+	unsigned long                           spoofed_dev;
+	unsigned int                            spoofed_nlink;
+	long long                               spoofed_size;
+	long                                    spoofed_atime_tv_sec;
+	unsigned long                           spoofed_atime_tv_nsec;
+	long                                    spoofed_mtime_tv_sec;
+	unsigned long                           spoofed_mtime_tv_nsec;
+	long                                    spoofed_ctime_tv_sec;
+	unsigned long                           spoofed_ctime_tv_nsec;
+	long long                               spoofed_blocks;
+	long                                    spoofed_blksize;
+	int                                     flags;
+	int                                     err;
 };
 
-struct st_susfs_sus_mount_list {
-	struct list_head                        list;
-	struct st_susfs_sus_mount               info;
-};
-
-struct st_susfs_sus_kstat_list {
-	struct list_head                        list;
+struct st_susfs_sus_kstat_hlist {
+	struct hlist_node                       node;
+	unsigned long                           target_ino;
+	unsigned long                           target_dev;
+	struct kstatfs                          spoofed_kstatfs;
+	int                                     spoofed_mnt_id;
+	bool                                    is_fuse;
 	struct st_susfs_sus_kstat               info;
 };
+#endif
 
-struct st_susfs_sus_maps_list {
-	struct list_head                        list;
-	struct st_susfs_sus_maps                info;
-};
-
-struct st_susfs_try_umount_list {
-	struct list_head                        list;
-	struct st_susfs_try_umount              info;
-};
-
-struct st_susfs_sus_proc_fd_link_list {
-	struct list_head                        list;
-	struct st_susfs_sus_proc_fd_link        info;
-};
-
-struct st_susfs_sus_memfd_list {
-	struct list_head                        list;
-	struct st_susfs_sus_memfd               info;
-};
-
-struct st_susfs_mnt_id_recorder_list {
-	struct list_head                        list;
-	int                                     pid;
-	int                                     opened_count;
-	struct st_susfs_mnt_id_recorder         info;
-};
-
+/* spoof_uname */
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 struct st_susfs_uname {
-	char        sysname[__NEW_UTS_LEN+1];
-	char        nodename[__NEW_UTS_LEN+1];
-	char        release[__NEW_UTS_LEN+1];
-	char        version[__NEW_UTS_LEN+1];
-	char        machine[__NEW_UTS_LEN+1];
+	char                                    release[__NEW_UTS_LEN+1];
+	char                                    version[__NEW_UTS_LEN+1];
+	int                                     err;
+};
+#endif
+
+/* enable_log */
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+struct st_susfs_log {
+	bool                                    enabled;
+	int                                     err;
+};
+#endif
+
+/* spoof_cmdline_or_bootconfig */
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+struct st_susfs_spoof_cmdline_or_bootconfig {
+	char                                    fake_cmdline_or_bootconfig[SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE];
+	int                                     err;
+};
+#endif
+
+/* open_redirect */
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+struct st_susfs_open_redirect {
+	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	char                                    redirected_pathname[SUSFS_MAX_LEN_PATHNAME];
+	int                                     uid_scheme;
+	int                                     err;
 };
 
-bool susfs_is_current_ksu_domain(void);
-bool susfs_is_current_zygote_domain(void);
-
-int susfs_add_sus_path(struct st_susfs_sus_path* __user user_info);
-int susfs_add_sus_mount(struct st_susfs_sus_mount* __user user_info);
-int susfs_add_sus_kstat(struct st_susfs_sus_kstat* __user user_info);
-int susfs_update_sus_kstat(struct st_susfs_sus_kstat* __user user_info);
-int susfs_add_sus_maps(struct st_susfs_sus_maps* __user user_info);
-int susfs_update_sus_maps(struct st_susfs_sus_maps* __user user_info);
-int susfs_add_sus_proc_fd_link(struct st_susfs_sus_proc_fd_link* __user user_info);
-int susfs_add_sus_memfd(struct st_susfs_sus_memfd* __user user_info);
-int susfs_add_try_umount(struct st_susfs_try_umount* __user user_info);
-int susfs_set_uname(struct st_susfs_uname* __user user_info);
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
-int susfs_sus_path_by_path(struct path* file, int* errno_to_be_changed, int syscall_family);
-#else
-int susfs_sus_path_by_path(const struct path* file, int* errno_to_be_changed, int syscall_family);
+struct st_susfs_open_redirect_hlist {
+	struct hlist_node                       node;
+	unsigned long                           target_ino;
+	unsigned long                           target_dev;
+	unsigned long                           redirected_ino;
+	unsigned long                           redirected_dev;
+	int                                     spoofed_mnt_id;
+	struct kstatfs                          spoofed_kstatfs;
+	struct st_susfs_open_redirect           info;
+	bool                                    reversed_lookup_only;
+};
 #endif
-int susfs_sus_path_by_filename(struct filename* name, int* errno_to_be_changed, int syscall_family);
-int susfs_sus_mount(struct vfsmount* mnt, struct path* root);
-int susfs_sus_ino_for_filldir64(unsigned long ino);
-void susfs_sus_kstat(unsigned long ino, struct stat* out_stat);
-int susfs_sus_maps(unsigned long target_ino, unsigned long target_addr_size,
-					unsigned long* orig_ino, dev_t* orig_dev, vm_flags_t* flags,
-					unsigned long long* pgoff, struct vm_area_struct* vma, char* out_name);
-void susfs_sus_map_files_readlink(unsigned long target_ino, char* pathname);
-int susfs_sus_map_files_instantiate(struct vm_area_struct* vma);
-int susfs_is_sus_maps_list_empty(void);
-int susfs_sus_proc_fd_link(char *pathname, int len);
-int susfs_is_sus_proc_fd_link_list_empty(void);
-int susfs_sus_memfd(char *memfd_name);
-void susfs_try_umount(uid_t target_uid);
+
+/* sus_map */
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+struct st_susfs_sus_map {
+	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	int                                     err;
+};
+#endif
+
+/* avc log spoofing */
+struct st_susfs_avc_log_spoofing {
+	bool                                    enabled;
+	int                                     err;
+};
+
+/* get enabled features */
+struct st_susfs_enabled_features {
+	char                                    enabled_features[SUSFS_ENABLED_FEATURES_SIZE];
+	int                                     err;
+};
+
+/* show variant */
+struct st_susfs_variant {
+	char                                    susfs_variant[16];
+	int                                     err;
+};
+
+/* show version */
+struct st_susfs_version {
+	char                                    susfs_version[16];
+	int                                     err;
+};
+
+/***********************/
+/* FORWARD DECLARATION */
+/***********************/
+/* sus_path */
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+void susfs_add_sus_path(void __user **user_info);
+void susfs_add_sus_path_loop(void __user **user_info);
+#endif
+
+/* sus_mount */
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+void susfs_set_hide_sus_mnts_for_non_su_procs(void __user **user_info);
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
+/* sus_kstat */
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+void susfs_add_sus_kstat(void __user **user_info);
+void susfs_update_sus_kstat(void __user **user_info);
+#endif
+
+/* spoof_uname */
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+void susfs_set_uname(void __user **user_info);
 void susfs_spoof_uname(struct new_utsname* tmp);
-void susfs_add_mnt_id_recorder(struct mnt_namespace *ns);
-int susfs_get_fake_mnt_id(int mnt_id, int *out_mnt_id, int *out_parent_mnt_id);
-void susfs_remove_mnt_id_recorder(void);
-
-void susfs_set_log(bool enabled);
-extern bool susfs_is_log_enabled;
-extern void susfs_run_try_umount_for_current_mnt_ns(void);
-
-#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
-extern bool susfs_is_auto_add_sus_ksu_default_mount_enabled;
-extern void susfs_auto_add_sus_ksu_default_mount(const char __user *to_pathname);
-#endif
-#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
-extern bool susfs_is_auto_add_sus_bind_mount_enabled;
-extern int susfs_auto_add_sus_bind_mount(const char *pathname, struct path *path_target);
-#endif
-#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
-extern bool susfs_is_auto_add_try_umount_for_bind_mount_enabled;
-extern void susfs_auto_add_try_umount_for_bind_mount(struct path *path);
 #endif
 
-void susfs_change_error_no_by_pathname(char* pathname, int* errno_to_be_changed, int syscall_family);
-
-void __init susfs_init(void);
-
-
-#ifdef CONFIG_KSU_SUSFS
-int ksu_handle_susfs_prctl(int option, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5);
+/* enable_log */
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+void susfs_enable_log(void __user **user_info);
 #endif
+
+/* spoof_cmdline_or_bootconfig */
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+void susfs_set_cmdline_or_bootconfig(void __user **user_info);
+#endif
+
+/* open_redirect */
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+void susfs_add_open_redirect(void __user **user_info);
+#endif
+
+/* sus_map */
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+void susfs_add_sus_map(void __user **user_info);
+#endif
+
+void susfs_set_avc_log_spoofing(void __user **user_info);
+
+void susfs_get_enabled_features(void __user **user_info);
+void susfs_show_variant(void __user **user_info);
+void susfs_show_version(void __user **user_info);
+
+void susfs_start_sdcard_monitor_fn(void);
+
+/* susfs_init */
+void susfs_init(void);
 
 #endif

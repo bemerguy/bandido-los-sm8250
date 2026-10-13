@@ -1513,10 +1513,6 @@ struct task_struct {
 	/* Used by LSM modules for access restriction: */
 	void				*security;
 #endif
-#ifdef CONFIG_KSU_SUSFS
-	u64				susfs_task_state;
-	int				susfs_last_fake_mnt_id;
-#endif
 	/* task is frozen/stopped (used by the cgroup freezer) */
 	ANDROID_KABI_USE(1, unsigned frozen:1);
 

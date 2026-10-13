@@ -31,9 +31,6 @@
 #include <linux/bit_spinlock.h>
 #include <linux/rculist_bl.h>
 #include <linux/list_lru.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-#include <linux/susfs.h>
-#endif
 #include "internal.h"
 #include "mount.h"
 
