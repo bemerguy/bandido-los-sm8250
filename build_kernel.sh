@@ -39,12 +39,9 @@ if [[ $1 != "flash" ]]; then
 		CONFIG_PGOUSE_CLANG"
 
 	if [[ -v LLVM ]]; then
-		VERSION=$(clang -dumpversion)
-		COMPILER="clang$VERSION"
 		echo -e "# CONFIG_LTO_GCC is not set\n" >>out/.config
 		case $1 in
 		lto)
-			COMPILER="$COMPILER-lto"
 			echo -e "\n################# Compiling FULL CLANG LTO build #################\n"
 			echo -e "# CONFIG_THINLTO is not set\n" >>out/.config
 			echo -e "# CONFIG_PGOUSE_CLANG is not set\n" >>out/.config
@@ -72,11 +69,8 @@ if [[ $1 != "flash" ]]; then
 			;;
 		esac
 	else
-		VERSION=$(${BUILD_CROSS_COMPILE}gcc -dumpversion)
-		COMPILER="gcc$VERSION$2"
 		case $1 in
 		lto)
-			COMPILER="$COMPILER-lto"
 			echo -e "\n################# Compiling FULL GCC LTO build #################\n"
 			echo -e "\nCONFIG_LTO_GCC=y\n" >>out/.config
 			;;
@@ -92,8 +86,6 @@ if [[ $1 != "flash" ]]; then
 
 	make -j$CPU -C $(pwd) O=$(pwd)/out ARCH=arm64 CROSS_COMPILE=$BUILD_CROSS_COMPILE \
 		CLANG_TRIPLE=$CLANG_TRIPLE Image.gz-dtb 2>&1 | tee compile-bandido.log
-else
-	COMPILER="prebuilt"
 fi
 
 
@@ -101,7 +93,7 @@ if [[ -f "$IMAGE" ]]; then
 	DATE_END=$(date +"%s")
 	DIFF=$(($DATE_END - $DATE_START))
 
-	KERNELZIP="bandido-$COMPILER-$(date +"%Y%m%d%H%M").zip"
+	KERNELZIP="bandido-$(date +"%Y%m%d%H%M").zip"
 
 	rm AnyKernel3/dtb* >/dev/null 2>&1
 	rm AnyKernel3/*Image* >/dev/null 2>&1
