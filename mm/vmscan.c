@@ -1076,6 +1076,8 @@ enum page_references {
 	PAGEREF_ACTIVATE,
 };
 
+extern bool lcd_is_on;
+
 static enum page_references page_check_references(struct page *page,
 						  struct scan_control *sc)
 {
@@ -1092,6 +1094,10 @@ static enum page_references page_check_references(struct page *page,
 	 */
 	if (vm_flags & VM_LOCKED)
 		return PAGEREF_RECLAIM;
+
+	if ((vm_flags & VM_FG_PROTECT) && lcd_is_on &&
+	    sc->priority >= DEF_PRIORITY - 2)
+		return PAGEREF_ACTIVATE;
 
 	if (referenced_ptes == -1)
 		return PAGEREF_KEEP;

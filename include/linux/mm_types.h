@@ -533,6 +533,7 @@ struct mm_struct {
 #endif
 		} lru_gen;
 #endif /* CONFIG_LRU_GEN */
+		bool fg_protect;
 	} __randomize_layout;
 
 	/*

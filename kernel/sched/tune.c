@@ -668,8 +668,12 @@ static void schedtune_attach(struct cgroup_taskset *tset)
 
 	colocate = st->colocate;
 
-	cgroup_taskset_for_each(task, css, tset)
+	cgroup_taskset_for_each(task, css, tset) {
 		sync_cgroup_colocation(task, colocate);
+		if (task->pid == task->tgid && task->mm)
+			WRITE_ONCE(task->mm->fg_protect,
+				   colocate && __kuid_val(task_uid(task)) >= 10000);
+	}
 #endif
 
 	cgroup_taskset_for_each(task, css, tset) {

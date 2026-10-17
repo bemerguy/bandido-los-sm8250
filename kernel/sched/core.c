@@ -7951,8 +7951,13 @@ static void cpu_cgroup_attach(struct cgroup_taskset *tset)
 	struct task_struct *task;
 	struct cgroup_subsys_state *css;
 
-	cgroup_taskset_for_each(task, css, tset)
+	cgroup_taskset_for_each(task, css, tset) {
 		sched_move_task(task);
+		if (task->pid == task->tgid && task->mm)
+			WRITE_ONCE(task->mm->fg_protect,
+				   css_tg(css)->is_top_app &&
+				   __kuid_val(task_uid(task)) >= 10000);
+	}
 }
 
 #ifdef CONFIG_UCLAMP_TASK_GROUP

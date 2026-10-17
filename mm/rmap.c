@@ -828,6 +828,9 @@ static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
 		pra->vm_flags |= vma->vm_flags;
 	}
 
+	if (PageAnon(page) && READ_ONCE(vma->vm_mm->fg_protect))
+		pra->vm_flags |= VM_FG_PROTECT;
+
 	if (!pra->mapcount)
 		return false; /* To break the loop */
 
