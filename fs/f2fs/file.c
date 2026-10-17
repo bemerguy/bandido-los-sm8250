@@ -3121,15 +3121,8 @@ static int f2fs_ioc_setproject(struct file *filp, __u32 projid)
 	kprojid_t kprojid;
 	int err;
 
-	if (!f2fs_sb_has_project_quota(sbi)) {
-		if (projid != F2FS_DEF_PROJID)
-			return -EOPNOTSUPP;
-		else
-			return 0;
-	}
-
-	if (!f2fs_has_extra_attr(inode))
-		return -EOPNOTSUPP;
+	if (!f2fs_sb_has_project_quota(sbi) || !f2fs_has_extra_attr(inode))
+		return 0;
 
 	kprojid = make_kprojid(&init_user_ns, (projid_t)projid);
 
@@ -3168,8 +3161,6 @@ int f2fs_transfer_project_quota(struct inode *inode, kprojid_t kprojid)
 
 static int f2fs_ioc_setproject(struct file *filp, __u32 projid)
 {
-	if (projid != F2FS_DEF_PROJID)
-		return -EOPNOTSUPP;
 	return 0;
 }
 #endif
