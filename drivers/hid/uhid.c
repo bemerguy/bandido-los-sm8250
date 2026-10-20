@@ -12,6 +12,7 @@
 
 #include <linux/atomic.h>
 #include <linux/compat.h>
+#include <linux/compaction.h>
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/hid.h>
@@ -828,10 +829,13 @@ static int light_panel_state_change(struct notifier_block *nb,
     printk(KERN_DEBUG "light_panel_state_change(), lcd state : %d\n", panel_state);
     switch (panel_state) {
     case PANEL_OFF:
+    case PANEL_LPM:
         lcd_is_on = false;
+        compaction_lcd_state_changed();
         break;
     case PANEL_ON:
         lcd_is_on = true;
+        compaction_lcd_state_changed();
         break;
     default:
         break;

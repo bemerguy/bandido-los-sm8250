@@ -24,6 +24,10 @@
 #include <linux/page_owner.h>
 #include <linux/psi.h>
 #include "internal.h"
+#include <linux/module.h>
+#include <linux/moduleparam.h>
+
+extern bool lcd_is_on;
 
 #ifdef CONFIG_COMPACTION
 static inline void count_compact_event(enum vm_event_item item)
@@ -49,6 +53,20 @@ static inline void count_compact_events(enum vm_event_item item, long delta)
 #define block_end_pfn(pfn, order)	ALIGN((pfn) + 1, 1UL << (order))
 #define pageblock_start_pfn(pfn)	block_start_pfn(pfn, pageblock_order)
 #define pageblock_end_pfn(pfn)		block_end_pfn(pfn, pageblock_order)
+
+/*
+ * Fragmentation score check interval for proactive compaction purposes.
+ */
+static const unsigned int HPAGE_FRAG_CHECK_INTERVAL_MSEC = 5000;
+
+/*
+ * Page order with-respect-to which proactive compaction
+ * calculates external fragmentation, which is used as
+ * the "fragmentation score" of a node/zone.
+ * On mobile/Android, targeting order 3 (32KB) avoids wasting
+ * CPU on unachievable 2MB hugepage targets due to unmovable kernel pages.
+ */
+#define COMPACTION_HPAGE_ORDER	3
 
 static unsigned long release_freepages(struct list_head *freelist)
 {
@@ -119,7 +137,6 @@ EXPORT_SYMBOL(__SetPageMovable);
 
 void __ClearPageMovable(struct page *page)
 {
-	VM_BUG_ON_PAGE(!PageLocked(page), page);
 	VM_BUG_ON_PAGE(!PageMovable(page), page);
 	/*
 	 * Clear registered address_space val with keeping PAGE_MAPPING_MOVABLE
@@ -990,8 +1007,8 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 
 isolate_success:
 		list_add(&page->lru, &cc->migratepages);
-		cc->nr_migratepages++;
-		nr_isolated++;
+		cc->nr_migratepages += (1 << compound_order(page));
+		nr_isolated += (1 << compound_order(page));
 
 		/*
 		 * Avoid isolating too much unless this block is being
@@ -999,7 +1016,7 @@ isolate_success:
 		 * or a lock is contended. For contention, isolate quickly to
 		 * potentially remove one source of contention.
 		 */
-		if (cc->nr_migratepages == COMPACT_CLUSTER_MAX &&
+		if (cc->nr_migratepages >= COMPACT_CLUSTER_MAX &&
 		    !cc->rescan && !cc->contended) {
 			++low_pfn;
 			break;
@@ -1110,7 +1127,7 @@ isolate_migratepages_range(struct compact_control *cc, unsigned long start_pfn,
 		if (!pfn)
 			break;
 
-		if (cc->nr_migratepages == COMPACT_CLUSTER_MAX)
+		if (cc->nr_migratepages >= COMPACT_CLUSTER_MAX)
 			break;
 	}
 
@@ -1195,7 +1212,6 @@ move_freelist_head(struct list_head *freelist, struct page *freepage)
 
 	if (!list_is_last(freelist, &freepage->lru)) {
 		list_cut_before(&sublist, freelist, &freepage->lru);
-		if (!list_empty(&sublist))
 			list_splice_tail(&sublist, freelist);
 	}
 }
@@ -1213,7 +1229,6 @@ move_freelist_tail(struct list_head *freelist, struct page *freepage)
 
 	if (!list_is_first(freelist, &freepage->lru)) {
 		list_cut_position(&sublist, freelist, &freepage->lru);
-		if (!list_empty(&sublist))
 			list_splice_tail(&sublist, freelist);
 	}
 }
@@ -1847,6 +1862,103 @@ static inline bool is_via_compact_memory(int order)
 	return order == -1;
 }
 
+static bool kswapd_is_running(pg_data_t *pgdat)
+{
+	int i;
+
+	for (i = 0; i < MAX_KSWAPD_THREADS; i++) {
+		struct task_struct *kswapd = pgdat->kswapd[i];
+
+		if (kswapd && kswapd->state == TASK_RUNNING)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+ * A zone's fragmentation score is the external fragmentation wrt to the
+ * COMPACTION_HPAGE_ORDER. It returns a value in the range [0, 100].
+ */
+static unsigned int fragmentation_score_zone(struct zone *zone)
+{
+	return extfrag_for_order(zone, COMPACTION_HPAGE_ORDER);
+}
+
+/*
+ * A weighted zone's fragmentation score is the external fragmentation
+ * wrt to the COMPACTION_HPAGE_ORDER scaled by the zone's size. It
+ * returns a value in the range [0, 100].
+ *
+ * The scaling factor ensures that proactive compaction focuses on larger
+ * zones like ZONE_NORMAL, rather than smaller, specialized zones like
+ * ZONE_DMA32. For smaller zones, the score value remains close to zero,
+ * and thus never exceeds the high threshold for proactive compaction.
+ */
+static unsigned int fragmentation_score_zone_weighted(struct zone *zone)
+{
+	unsigned long score;
+
+	score = zone->present_pages * fragmentation_score_zone(zone);
+	return div64_ul(score, zone->zone_pgdat->node_present_pages + 1);
+}
+
+/*
+ * The per-node proactive (background) compaction process is started by its
+ * corresponding kcompactd thread when the node's fragmentation score
+ * exceeds the high threshold. The compaction process remains active till
+ * the node's score falls below the low threshold, or one of the back-off
+ * conditions is met.
+ */
+static unsigned int fragmentation_score_node(pg_data_t *pgdat)
+{
+	unsigned int score = 0;
+	int zoneid;
+
+	for (zoneid = 0; zoneid < MAX_NR_ZONES; zoneid++) {
+		struct zone *zone;
+
+		zone = &pgdat->node_zones[zoneid];
+		score += fragmentation_score_zone_weighted(zone);
+	}
+
+	return score;
+}
+
+static inline unsigned int effective_proactiveness(void)
+{
+	return lcd_is_on ?
+		sysctl_compaction_proactiveness : sysctl_compaction_proactiveness_screen_off;
+}
+
+static unsigned int fragmentation_score_wmark(pg_data_t *pgdat, bool low)
+{
+	unsigned int wmark_low;
+	unsigned int proactiveness = effective_proactiveness();
+
+	if (!proactiveness)
+		return 100;
+
+	/*
+	 * Proactive compaction targets a maximum fragmentation score of
+	 * 100 - proactiveness. It begins when the score exceeds this
+	 * target plus a buffer of 10.
+	 */
+	wmark_low = 100U - proactiveness;
+	return low ? wmark_low : min(wmark_low + 10, 100U);
+}
+
+static bool should_proactive_compact_node(pg_data_t *pgdat)
+{
+	int wmark_high;
+
+	if (!effective_proactiveness() || kswapd_is_running(pgdat))
+		return false;
+
+	wmark_high = fragmentation_score_wmark(pgdat, false);
+	return fragmentation_score_node(pgdat) > wmark_high;
+}
+
 static enum compact_result __compact_finished(struct compact_control *cc)
 {
 	unsigned int order;
@@ -1871,6 +1983,25 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 			return COMPACT_COMPLETE;
 		else
 			return COMPACT_PARTIAL_SKIPPED;
+	}
+
+	if (cc->proactive_compaction) {
+		int score, wmark_low;
+		pg_data_t *pgdat;
+
+		pgdat = cc->zone->zone_pgdat;
+		if (kswapd_is_running(pgdat))
+			return COMPACT_PARTIAL_SKIPPED;
+
+		score = fragmentation_score_zone(cc->zone);
+		wmark_low = fragmentation_score_wmark(pgdat, true);
+
+		if (score > wmark_low)
+			ret = COMPACT_CONTINUE;
+		else
+			ret = COMPACT_SUCCESS;
+
+		goto out;
 	}
 
 	if (is_via_compact_memory(cc->order))
@@ -1931,6 +2062,7 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 		}
 	}
 
+out:
 	if (cc->contended || fatal_signal_pending(current))
 		ret = COMPACT_CONTENDED;
 
@@ -2400,6 +2532,45 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 	return rc;
 }
 
+/*
+ * Compact all zones within a node till each zone's fragmentation score
+ * reaches within proactive compaction thresholds (as determined by the
+ * proactiveness tunable).
+ *
+ * It is possible that the function returns before reaching score targets
+ * due to various back-off conditions, such as, contention on per-node or
+ * per-zone locks.
+ */
+static void proactive_compact_node(pg_data_t *pgdat)
+{
+	int zoneid;
+	struct zone *zone;
+	struct compact_control cc = {
+		.order = -1,
+		.mode = MIGRATE_SYNC_LIGHT,
+		.ignore_skip_hint = true,
+		.whole_zone = true,
+		.gfp_mask = GFP_KERNEL,
+		.proactive_compaction = true,
+	};
+
+	for (zoneid = 0; zoneid < MAX_NR_ZONES; zoneid++) {
+		zone = &pgdat->node_zones[zoneid];
+		if (!populated_zone(zone))
+			continue;
+
+		cc.zone = zone;
+
+		compact_zone(&cc, NULL);
+
+		drain_all_pages(zone);
+
+		VM_BUG_ON(!list_empty(&cc.freepages));
+		VM_BUG_ON(!list_empty(&cc.migratepages));
+	}
+}
+
+/* Compact all zones within a node */
 static void __compact_node(int nid, bool sync)
 {
 	pg_data_t *pgdat = NODE_DATA(nid);
@@ -2463,6 +2634,73 @@ static void compact_nodes(void)
 int sysctl_compact_memory;
 
 /*
+ * Tunable for proactive compaction. It determines how
+ * aggressively the kernel should compact memory in the
+ * background. It takes values in the range [0, 100].
+ */
+unsigned int __read_mostly sysctl_compaction_proactiveness = 20;
+unsigned int __read_mostly sysctl_compaction_proactiveness_screen_off = 40;
+
+/*
+ * Called on screen on/off: make kcompactd re-evaluate the proactive
+ * state immediately, so the screen-off backoff gets reset on screen on.
+ */
+void compaction_lcd_state_changed(void)
+{
+	int nid;
+
+	for_each_online_node(nid) {
+		pg_data_t *pgdat = NODE_DATA(nid);
+
+		pgdat->proactive_compact_trigger = true;
+		wake_up_interruptible(&pgdat->kcompactd_wait);
+	}
+}
+
+void trigger_proactive_compaction(void)
+{
+	int nid;
+	unsigned int proactiveness = effective_proactiveness();
+
+	if (!proactiveness) {
+		pr_err("proactive compaction: trigger called but proactiveness is 0 (lcd_is_on=%d)\n",
+			lcd_is_on);
+		return;
+	}
+
+	pr_err("proactive compaction: trigger waking kcompactd (lcd_is_on=%d, proactiveness=%u)\n",
+		lcd_is_on, proactiveness);
+
+	lru_add_drain_all();
+
+	for_each_online_node(nid) {
+		pg_data_t *pgdat = NODE_DATA(nid);
+
+		if (pgdat->proactive_compact_trigger)
+			continue;
+
+		reset_isolation_suitable(pgdat);
+		pgdat->proactive_compact_trigger = true;
+		wake_up_interruptible(&pgdat->kcompactd_wait);
+	}
+}
+
+int compaction_proactiveness_sysctl_handler(struct ctl_table *table, int write,
+		void *buffer, size_t *length, loff_t *ppos)
+{
+	int rc;
+
+	rc = proc_dointvec_minmax(table, write, buffer, length, ppos);
+	if (rc)
+		return rc;
+
+	if (write && effective_proactiveness())
+		trigger_proactive_compaction();
+
+	return 0;
+}
+
+/*
  * This is the entry point for compacting all nodes via
  * /proc/sys/vm/compact_memory
  */
@@ -2514,7 +2752,8 @@ void compaction_unregister_node(struct node *node)
 
 static inline bool kcompactd_work_requested(pg_data_t *pgdat)
 {
-	return pgdat->kcompactd_max_order > 0 || kthread_should_stop();
+	return pgdat->kcompactd_max_order > 0 || kthread_should_stop() ||
+		pgdat->proactive_compact_trigger;
 }
 
 static bool kcompactd_node_suitable(pg_data_t *pgdat)
@@ -2641,6 +2880,9 @@ void wakeup_kcompactd(pg_data_t *pgdat, int order, int classzone_idx)
 	wake_up_interruptible(&pgdat->kcompactd_wait);
 }
 
+static unsigned int proactively_compacted;
+module_param(proactively_compacted, uint, 0644);
+
 /*
  * The background compaction daemon, started as a kernel thread
  * from the init process.
@@ -2649,6 +2891,9 @@ static int kcompactd(void *p)
 {
 	pg_data_t *pgdat = (pg_data_t*)p;
 	struct task_struct *tsk = current;
+	long default_timeout = msecs_to_jiffies(HPAGE_FRAG_CHECK_INTERVAL_MSEC);
+	long timeout = default_timeout;
+	long off_timeout = default_timeout;
 
 	const struct cpumask *cpumask = cpumask_of_node(pgdat->node_id);
 
@@ -2661,15 +2906,75 @@ static int kcompactd(void *p)
 	pgdat->kcompactd_classzone_idx = pgdat->nr_zones - 1;
 
 	while (!kthread_should_stop()) {
-		unsigned long pflags;
-
+		/*
+		 * Avoid the unnecessary wakeup for proactive compaction
+		 * when it is disabled.
+		 */
+		if (!effective_proactiveness())
+			timeout = MAX_SCHEDULE_TIMEOUT;
 		trace_mm_compaction_kcompactd_sleep(pgdat->node_id);
-		wait_event_freezable(pgdat->kcompactd_wait,
-				kcompactd_work_requested(pgdat));
+		if (wait_event_freezable_timeout(pgdat->kcompactd_wait,
+			kcompactd_work_requested(pgdat), timeout) &&
+			!pgdat->proactive_compact_trigger) {
+			unsigned long pflags;
 
-		psi_memstall_enter(&pflags);
-		kcompactd_do_work(pgdat);
-		psi_memstall_leave(&pflags);
+			psi_memstall_enter(&pflags);
+			kcompactd_do_work(pgdat);
+			psi_memstall_leave(&pflags);
+			/*
+			 * Reset the timeout value. The defer timeout from
+			 * proactive compaction is lost here but that is fine
+			 * as the condition of the zone changing substantionally
+			 * then carrying on with the previous defer interval is
+			 * not useful.
+			 */
+			timeout = default_timeout;
+			continue;
+		}
+
+		/*
+		 * Start the proactive work with default timeout while the
+		 * screen is on. While it is off, back off exponentially up to
+		 * the defer cap. Based on the fragmentation score, this timeout
+		 * is updated.
+		 */
+		if (lcd_is_on) {
+			timeout = off_timeout = default_timeout;
+		} else {
+			timeout = off_timeout;
+			off_timeout = min(off_timeout << 1,
+					default_timeout << COMPACT_MAX_DEFER_SHIFT);
+		}
+		if (should_proactive_compact_node(pgdat)) {
+			unsigned int prev_score, score;
+
+			prev_score = fragmentation_score_node(pgdat);
+			proactive_compact_node(pgdat);
+			score = fragmentation_score_node(pgdat);
+			/*
+			 * Defer proactive compaction if the fragmentation
+			 * score did not go down i.e. no progress made.
+			 */
+			if (unlikely(score >= prev_score)) {
+				timeout =
+				   default_timeout << COMPACT_MAX_DEFER_SHIFT;
+				pr_err("proactive compaction: node %d score %u -> %u (no progress, deferring %lds, lcd_is_on=%d)\n",
+					pgdat->node_id, prev_score, score,
+					timeout / HZ, lcd_is_on);
+			} else {
+				proactively_compacted++;
+				pr_err("proactive compaction: node %d score %u -> %u (total: %u, lcd_is_on=%d)\n",
+				       pgdat->node_id, prev_score, score,
+				       proactively_compacted, lcd_is_on);
+			}
+		} else if (unlikely(pgdat->proactive_compact_trigger)) {
+			pr_err("proactive compaction: triggered on node %d but skipped (score=%u, wmark_high=%u, kswapd=%d, lcd_is_on=%d)\n",
+				pgdat->node_id, fragmentation_score_node(pgdat),
+				fragmentation_score_wmark(pgdat, false),
+				kswapd_is_running(pgdat), lcd_is_on);
+		}
+		if (unlikely(pgdat->proactive_compact_trigger))
+			pgdat->proactive_compact_trigger = false;
 	}
 
 	return 0;
