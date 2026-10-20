@@ -7953,10 +7953,34 @@ static void cpu_cgroup_attach(struct cgroup_taskset *tset)
 
 	cgroup_taskset_for_each(task, css, tset) {
 		sched_move_task(task);
-		if (task->pid == task->tgid && task->mm)
-			WRITE_ONCE(task->mm->fg_protect,
-				   css_tg(css)->is_top_app &&
-				   __kuid_val(task_uid(task)) >= 10000);
+		if (task->pid == task->tgid) {
+			struct mm_struct *mm;
+			bool acquired = false, lost = false;
+
+			task_lock(task);
+			mm = task->mm;
+			if (mm) {
+				bool old_val = mm->fg_protect;
+				bool new_val = css_tg(css)->is_top_app &&
+					       __kuid_val(task_uid(task)) >= 10000;
+
+				if (old_val != new_val) {
+					WRITE_ONCE(mm->fg_protect, new_val);
+					if (new_val)
+						acquired = true;
+					else
+						lost = true;
+				}
+			}
+			task_unlock(task);
+
+			if (acquired)
+				pr_err("fg_protect (cpuctl): task %s [%d, uid %u] ACQUIRED fg_protect\n",
+				       task->comm, task->pid, __kuid_val(task_uid(task)));
+			else if (lost)
+				pr_err("fg_protect (cpuctl): task %s [%d, uid %u] LOST fg_protect\n",
+				       task->comm, task->pid, __kuid_val(task_uid(task)));
+		}
 	}
 }
 
