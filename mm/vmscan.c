@@ -2858,13 +2858,6 @@ static int page_lru_refs(struct page *page)
 	return ((flags & LRU_REFS_MASK) >> LRU_REFS_PGOFF) + 1;
 }
 
-static int page_lru_tier(struct page *page)
-{
-	int refs = page_lru_refs(page);
-
-	return lru_tier_from_refs(refs);
-}
-
 static bool get_cap(int cap)
 {
 #ifdef CONFIG_LRU_GEN_ENABLED
