@@ -209,10 +209,12 @@ static inline bool sugov_ui_active(struct sugov_cpu *sg_cpu, u64 time)
 
 	/*
 	 * If the display is at high refresh rate (120Hz), hold the boost
-	 * across inter-frame VSYNC sleeps for up to 32ms (~4 frames).
-	 * If the screen is at 60Hz or idle, do not extend boost.
+	 * across inter-frame VSYNC sleeps for up to 32ms (~4 frames)
+	 * during active user interaction (touch/scroll).
+	 * If the screen is at 60Hz or idle/passive, do not extend boost.
 	 */
-	if (display_is_120hz() && sg_cpu->last_ui_time && (time - sg_cpu->last_ui_time < 32000000ULL))
+	if (sched_boost() != NO_BOOST && display_is_120hz() && sg_cpu->last_ui_time &&
+	    (time - sg_cpu->last_ui_time < 32000000ULL))
 		return true;
 
 	return false;
@@ -229,10 +231,12 @@ static void sugov_walt_adjust(struct sugov_cpu *sg_cpu, unsigned long *util,
 {
 #ifdef CONFIG_SCHED_WALT
 	struct sugov_policy *sg_policy = sg_cpu->sg_policy;
+	bool boost_active = sugov_rtg_boost_active(sg_cpu) || sugov_ui_active(sg_cpu, time);
 
-	if (sugov_rtg_boost_active(sg_cpu) || sugov_ui_active(sg_cpu, time) ||
-	    schedtune_cpu_boost_with(sg_cpu->cpu, NULL) > 0)
-		*util = max(*util, sg_policy->rtg_boost_util);
+	if (boost_active) {
+		if (sg_policy->policy->cpu == 0 || sched_boost() != NO_BOOST)
+			*util = max(*util, sg_policy->rtg_boost_util);
+	}
 #endif
 }
 
@@ -277,7 +281,7 @@ static unsigned long bandido_map_util_freq(unsigned long util,
 	if (sg_cpu->dvfs_headroom_lut)
 		util = sg_cpu->dvfs_headroom_lut[min_t(unsigned long, util, SCHED_CAPACITY_SCALE)];
 
-	return (freq + (freq >> 2)) * util / cap;
+	return mult_frac(freq, util, cap);
 }
 
 static unsigned int get_next_freq(struct sugov_policy *sg_policy,
@@ -445,6 +449,7 @@ static unsigned int sugov_next_freq_shared(struct sugov_cpu *sg_cpu, u64 time)
 		struct sugov_cpu *j_sg_cpu = &per_cpu(sugov_cpu, j);
 		unsigned long j_util, j_max;
 
+		j_sg_cpu->util = sugov_get_util(j_sg_cpu);
 		j_util = j_sg_cpu->util;
 		j_max = j_sg_cpu->max;
 		if (!j_max)

@@ -32,8 +32,6 @@ static inline bool is_ui_thread_name(struct task_struct *p)
 
 	if (c == 'R' && (!strcmp(comm, "RenderThread") || !strcmp(comm, "RenderEngine")))
 		return true;
-	if (c == 's' && !strcmp(comm, "surfaceflinger"))
-		return true;
 	if (c == 'w' && !strcmp(comm, "wmshell.anim"))
 		return true;
 	if (c == 'a' && !strcmp(comm, "android.anim"))
