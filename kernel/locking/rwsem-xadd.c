@@ -385,13 +385,15 @@ static inline bool rwsem_can_spin_on_owner(struct rw_semaphore *sem)
 	if (need_resched())
 		return false;
 
-	rcu_read_lock();
+	/*
+	 * Preemption is already disabled, which acts as an RCU read-side
+	 * critical section; thus the task_struct will not go away.
+	 */
 	owner = READ_ONCE(sem->owner);
 	if (owner) {
 		ret = is_rwsem_owner_spinnable(owner) &&
 		      owner_on_cpu(owner);
 	}
-	rcu_read_unlock();
 	return ret;
 }
 
@@ -405,13 +407,13 @@ static noinline bool rwsem_spin_on_owner(struct rw_semaphore *sem)
 	if (!is_rwsem_owner_spinnable(owner))
 		return false;
 
-	rcu_read_lock();
 	while (owner && (READ_ONCE(sem->owner) == owner)) {
 		/*
 		 * Ensure we emit the owner->on_cpu, dereference _after_
-		 * checking sem->owner still matches owner, if that fails,
-		 * owner might point to free()d memory, if it still matches,
-		 * the rcu_read_lock() ensures the memory stays valid.
+		 * checking sem->owner still matches owner. And we already
+		 * disabled preemption which is equal to the RCU read-side
+		 * critical section in optimistic spinning code. Thus the
+		 * task_struct won't go away during the spinning period.
 		 */
 		barrier();
 
@@ -419,14 +421,11 @@ static noinline bool rwsem_spin_on_owner(struct rw_semaphore *sem)
 		 * abort spinning when need_resched or owner is not running or
 		 * owner's cpu is preempted.
 		 */
-		if (need_resched() || !owner_on_cpu(owner)) {
-			rcu_read_unlock();
+		if (need_resched() || !owner_on_cpu(owner))
 			return false;
-		}
 
 		cpu_relax();
 	}
-	rcu_read_unlock();
 
 	/*
 	 * If there is a new owner or the owner is not set, we continue
