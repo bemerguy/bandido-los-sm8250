@@ -3994,8 +3994,12 @@ next:
 
 	/* see the comment on lru_gen_struct */
 	if (can_swap) {
-		min_seq[LRU_GEN_ANON] = min(min_seq[LRU_GEN_ANON], min_seq[LRU_GEN_FILE]);
-		min_seq[LRU_GEN_FILE] = max(min_seq[LRU_GEN_ANON], lrugen->min_seq[LRU_GEN_FILE]);
+		unsigned long seq = lrugen->max_seq - MIN_NR_GENS;
+
+		if (min_seq[LRU_GEN_ANON] > seq && min_seq[LRU_GEN_FILE] < seq)
+			min_seq[LRU_GEN_ANON] = seq;
+		else if (min_seq[LRU_GEN_FILE] > seq && min_seq[LRU_GEN_ANON] < seq)
+			min_seq[LRU_GEN_FILE] = seq;
 	}
 
 	for (type = !can_swap; type < ANON_AND_FILE; type++) {
@@ -4767,12 +4771,12 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
 		else
 			swappiness = 0;
 
+		if (should_run_aging(lruvec, max_seq, sc, swappiness))
+			try_to_inc_max_seq(lruvec, max_seq, sc, swappiness, false);
+
 		nr_to_scan = get_nr_to_scan(lruvec, sc, swappiness);
 		if (!nr_to_scan)
 			break;
-
-		if (should_run_aging(lruvec, max_seq, sc, swappiness))
-			try_to_inc_max_seq(lruvec, max_seq, sc, swappiness, false);
 
 		delta = evict_pages(lruvec, sc, swappiness, &swapped);
 		if (!delta)
