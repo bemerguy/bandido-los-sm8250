@@ -3281,8 +3281,8 @@ static bool iterate_mm_list_nowalk(struct lruvec *lruvec, unsigned long max_seq)
 	VM_BUG_ON(mm_state->seq + 1 < max_seq);
 
 	if (max_seq > mm_state->seq && !mm_state->nr_walkers) {
-		VM_BUG_ON(mm_state->head && mm_state->head != &mm_list->fifo);
-
+		mm_state->head = NULL;
+		mm_state->tail = NULL;
 		WRITE_ONCE(mm_state->seq, mm_state->seq + 1);
 		reset_mm_stats(lruvec, NULL, true);
 		success = true;
@@ -4651,9 +4651,6 @@ static int evict_pages(struct lruvec *lruvec, struct scan_control *sc, int swapp
 	if (try_to_inc_min_seq(lruvec, swappiness))
 		scanned++;
 
-	if (get_nr_gens(lruvec, LRU_GEN_FILE) == MIN_NR_GENS)
-		scanned = 0;
-
 	spin_unlock_irq(&pgdat->lru_lock);
 
 	if (list_empty(&list))
@@ -4719,22 +4716,27 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, bool 
 	if (!mem_cgroup_online(memcg))
 		nr_to_scan++;
 
-	if (!nr_to_scan)
-		return 0;
+	return nr_to_scan;
+}
 
-	if (!need_aging) {
-		sc->memcgs_need_aging = false;
-		return nr_to_scan;
-	}
+static bool should_run_aging(struct lruvec *lruvec, unsigned long max_seq,
+			     struct scan_control *sc, int swappiness)
+{
+	DEFINE_MIN_SEQ(lruvec);
+	unsigned long min_seq_evict = swappiness ?
+		min(min_seq[LRU_GEN_ANON], min_seq[LRU_GEN_FILE]) :
+		min_seq[LRU_GEN_FILE];
 
-	/* leave the work to lru_gen_age_node() */
-	if (current_is_kswapd())
-		return 0;
+	/* have to run aging, since eviction is not possible anymore */
+	if (min_seq_evict + MIN_NR_GENS > max_seq)
+		return true;
 
-	if (try_to_inc_max_seq(lruvec, max_seq, sc, can_swap, false))
-		return nr_to_scan;
+	/* try to avoid aging, do gentle reclaim at the default priority */
+	if (sc->priority == DEF_PRIORITY)
+		return false;
 
-	return min_seq[LRU_GEN_FILE] + MIN_NR_GENS <= max_seq ? nr_to_scan : 0;
+	/* better to run aging even though eviction is still possible */
+	return min_seq_evict + MIN_NR_GENS == max_seq;
 }
 
 static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
@@ -4756,6 +4758,7 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
 		int delta;
 		int swappiness;
 		long nr_to_scan;
+		DEFINE_MAX_SEQ(lruvec);
 
 		if (sc->may_swap)
 			swappiness = get_swappiness(lruvec, sc);
@@ -4767,6 +4770,9 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
 		nr_to_scan = get_nr_to_scan(lruvec, sc, swappiness);
 		if (!nr_to_scan)
 			break;
+
+		if (should_run_aging(lruvec, max_seq, sc, swappiness))
+			try_to_inc_max_seq(lruvec, max_seq, sc, swappiness, false);
 
 		delta = evict_pages(lruvec, sc, swappiness, &swapped);
 		if (!delta)
