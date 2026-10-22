@@ -2941,7 +2941,7 @@ pgtable_t pte_alloc_one(struct mm_struct *mm,
 	if (!page)
 		return NULL;
 	if (!pgtable_page_ctor(page)) {
-		free_unref_page(page);
+		free_unref_page(page, 0);
 		return NULL;
 	}
 	return (pte_t *) page_address(page);

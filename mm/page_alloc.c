@@ -669,6 +669,21 @@ out:
  * This usage means that zero-order pages may not be compound.
  */
 
+static inline unsigned int order_to_pindex(int migratetype, int order)
+{
+	return (MIGRATE_PCPTYPES * order) + migratetype;
+}
+
+static inline int pindex_to_order(unsigned int pindex)
+{
+	return pindex / MIGRATE_PCPTYPES;
+}
+
+static inline bool pcp_allowed_order(unsigned int order)
+{
+	return order <= PAGE_ALLOC_COSTLY_ORDER;
+}
+
 void free_compound_page(struct page *page)
 {
 	__free_pages_ok(page, compound_order(page));
@@ -1215,9 +1230,9 @@ static __always_inline bool free_pages_prepare(struct page *page,
 }
 
 #ifdef CONFIG_DEBUG_VM
-static inline bool free_pcp_prepare(struct page *page)
+static inline bool free_pcp_prepare(struct page *page, unsigned int order)
 {
-	return free_pages_prepare(page, 0, true);
+	return free_pages_prepare(page, order, true);
 }
 
 static inline bool bulkfree_pcp_prepare(struct page *page)
@@ -1225,9 +1240,9 @@ static inline bool bulkfree_pcp_prepare(struct page *page)
 	return false;
 }
 #else
-static bool free_pcp_prepare(struct page *page)
+static bool free_pcp_prepare(struct page *page, unsigned int order)
 {
-	return free_pages_prepare(page, 0, false);
+	return free_pages_prepare(page, order, false);
 }
 
 static bool bulkfree_pcp_prepare(struct page *page)
@@ -1247,93 +1262,59 @@ static inline void prefetch_buddy(struct page *page)
 
 /*
  * Frees a number of pages from the PCP lists
- * Assumes all pages on list are in same zone, and of same order.
+ * Assumes all pages on list are in same zone.
  * count is the number of pages to free.
- *
- * If the zone was previously in an "all pages pinned" state then look to
- * see if this freeing clears that state.
- *
- * And clear the zone's pages_scanned counter, to hold off the "all pages are
- * pinned" detection logic.
  */
 static void free_pcppages_bulk(struct zone *zone, int count,
 					struct per_cpu_pages *pcp)
 {
-	int migratetype = 0;
-	int batch_free = 0;
-	int prefetch_nr = 0;
+	int pindex = 0;
 	bool isolated_pageblocks;
-	struct page *page, *tmp;
-	LIST_HEAD(head);
 
-	/*
-	 * Ensure proper count is passed which otherwise would stuck in the
-	 * below while (list_empty(list)) loop.
-	 */
 	count = min(pcp->count, count);
-	while (count) {
-		struct list_head *list;
-
-		/*
-		 * Remove pages from lists in a round-robin fashion. A
-		 * batch_free count is maintained that is incremented when an
-		 * empty list is encountered.  This is so more pages are freed
-		 * off fuller lists instead of spinning excessively around empty
-		 * lists
-		 */
-		do {
-			batch_free++;
-			if (++migratetype == MIGRATE_PCPTYPES)
-				migratetype = 0;
-			list = &pcp->lists[migratetype];
-		} while (list_empty(list));
-
-		/* This is the only non-empty list. Free them all. */
-		if (batch_free == MIGRATE_PCPTYPES)
-			batch_free = count;
-
-		do {
-			page = list_last_entry(list, struct page, lru);
-			/* must delete to avoid corrupting pcp list */
-			list_del(&page->lru);
-			pcp->count--;
-
-			if (bulkfree_pcp_prepare(page))
-				continue;
-
-			list_add_tail(&page->lru, &head);
-
-			/*
-			 * We are going to put the page back to the global
-			 * pool, prefetch its buddy to speed up later access
-			 * under zone->lock. It is believed the overhead of
-			 * an additional test and calculating buddy_pfn here
-			 * can be offset by reduced memory latency later. To
-			 * avoid excessive prefetching due to large count, only
-			 * prefetch buddy for the first pcp->batch nr of pages.
-			 */
-			if (prefetch_nr++ < pcp->batch)
-				prefetch_buddy(page);
-		} while (--count && --batch_free && !list_empty(list));
-	}
+	if (count <= 0)
+		return;
 
 	spin_lock(&zone->lock);
 	isolated_pageblocks = has_isolate_pageblock(zone);
 
-	/*
-	 * Use safe version since after __free_one_page(),
-	 * page->lru.next will not point to original list.
-	 */
-	list_for_each_entry_safe(page, tmp, &head, lru) {
-		int mt = get_pcppage_migratetype(page);
-		/* MIGRATE_ISOLATE page should not go to pcplists */
-		VM_BUG_ON_PAGE(is_migrate_isolate(mt), page);
-		/* Pageblock could have been isolated meanwhile */
-		if (unlikely(isolated_pageblocks))
-			mt = get_pageblock_migratetype(page);
+	while (count > 0 && pcp->count > 0) {
+		struct list_head *list;
+		int nr_pages, order;
 
-		__free_one_page(page, page_to_pfn(page), zone, 0, mt);
-		trace_mm_page_pcpu_drain(page, 0, mt);
+		/* Remove pages from lists in a round-robin fashion. */
+		do {
+			if (++pindex > NR_PCP_LISTS - 1)
+				pindex = 0;
+			list = &pcp->lists[pindex];
+		} while (list_empty(list));
+
+		order = pindex_to_order(pindex);
+		nr_pages = 1 << order;
+		do {
+			struct page *page;
+			unsigned long pfn;
+			int mt;
+
+			page = list_last_entry(list, struct page, lru);
+			pfn = page_to_pfn(page);
+			mt = get_pcppage_migratetype(page);
+
+			/* must delete to avoid corrupting pcp list */
+			list_del(&page->lru);
+			count -= nr_pages;
+			pcp->count -= nr_pages;
+
+			if (bulkfree_pcp_prepare(page))
+				continue;
+
+			VM_BUG_ON_PAGE(is_migrate_isolate(mt), page);
+			if (unlikely(isolated_pageblocks))
+				mt = get_pageblock_migratetype(page);
+
+			__free_one_page(page, pfn, zone, order, mt);
+			trace_mm_page_pcpu_drain(page, order, mt);
+		} while (count > 0 && !list_empty(list));
 	}
 	spin_unlock(&zone->lock);
 }
@@ -2780,7 +2761,7 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
 		if (unlikely(page == NULL))
 			break;
 
-		if (unlikely(check_pcp_refill(page)))
+		if (unlikely(check_new_pages(page, order)))
 			continue;
 
 		/*
@@ -2820,12 +2801,21 @@ static struct list_head *get_populated_pcp_list(struct zone *zone,
 			unsigned int order, struct per_cpu_pages *pcp,
 			int migratetype, unsigned int alloc_flags)
 {
-	struct list_head *list = &pcp->lists[migratetype];
+	int pindex = order_to_pindex(migratetype, order);
+	struct list_head *list = &pcp->lists[pindex];
 
 	if (list_empty(list)) {
-		pcp->count += rmqueue_bulk(zone, order,
-				pcp->batch, list,
+		int batch = READ_ONCE(pcp->batch);
+		int alloced;
+
+		if (order > 0)
+			batch = max(batch >> order, 2);
+
+		alloced = rmqueue_bulk(zone, order,
+				batch, list,
 				migratetype, alloc_flags);
+
+		pcp->count += alloced << order;
 
 		if (list_empty(list))
 			list = NULL;
@@ -3056,11 +3046,11 @@ void mark_free_pages(struct zone *zone)
 }
 #endif /* CONFIG_PM */
 
-static bool free_unref_page_prepare(struct page *page, unsigned long pfn)
+static bool free_unref_page_prepare(struct page *page, unsigned long pfn, unsigned int order)
 {
 	int migratetype;
 
-	if (!free_pcp_prepare(page))
+	if (!free_pcp_prepare(page, order))
 		return false;
 
 	migratetype = get_pfnblock_migratetype(page, pfn);
@@ -3068,14 +3058,15 @@ static bool free_unref_page_prepare(struct page *page, unsigned long pfn)
 	return true;
 }
 
-static void free_unref_page_commit(struct page *page, unsigned long pfn)
+static void free_unref_page_commit(struct page *page, unsigned long pfn, unsigned int order)
 {
 	struct zone *zone = page_zone(page);
 	struct per_cpu_pages *pcp;
 	int migratetype;
+	int pindex;
 
 	migratetype = get_pcppage_migratetype(page);
-	__count_vm_event(PGFREE);
+	__count_vm_events(PGFREE, 1 << order);
 
 	/*
 	 * We only track unmovable, reclaimable and movable on pcp lists.
@@ -3086,15 +3077,16 @@ static void free_unref_page_commit(struct page *page, unsigned long pfn)
 	 */
 	if (migratetype >= MIGRATE_PCPTYPES) {
 		if (unlikely(is_migrate_isolate(migratetype))) {
-			free_one_page(zone, page, pfn, 0, migratetype);
+			free_one_page(zone, page, pfn, order, migratetype);
 			return;
 		}
 		migratetype = MIGRATE_MOVABLE;
 	}
 
 	pcp = &this_cpu_ptr(zone->pageset)->pcp;
-	list_add(&page->lru, &pcp->lists[migratetype]);
-	pcp->count++;
+	pindex = order_to_pindex(migratetype, order);
+	list_add(&page->lru, &pcp->lists[pindex]);
+	pcp->count += 1 << order;
 	if (pcp->count >= pcp->high) {
 		unsigned long batch = READ_ONCE(pcp->batch);
 		free_pcppages_bulk(zone, batch, pcp);
@@ -3102,18 +3094,18 @@ static void free_unref_page_commit(struct page *page, unsigned long pfn)
 }
 
 /*
- * Free a 0-order page
+ * Free a page (order <= PAGE_ALLOC_COSTLY_ORDER) via PCP
  */
-void free_unref_page(struct page *page)
+void free_unref_page(struct page *page, unsigned int order)
 {
 	unsigned long flags;
 	unsigned long pfn = page_to_pfn(page);
 
-	if (!free_unref_page_prepare(page, pfn))
+	if (!free_unref_page_prepare(page, pfn, order))
 		return;
 
 	local_irq_save(flags);
-	free_unref_page_commit(page, pfn);
+	free_unref_page_commit(page, pfn, order);
 	local_irq_restore(flags);
 }
 
@@ -3129,7 +3121,7 @@ void free_unref_page_list(struct list_head *list)
 	/* Prepare pages for freeing */
 	list_for_each_entry_safe(page, next, list, lru) {
 		pfn = page_to_pfn(page);
-		if (!free_unref_page_prepare(page, pfn))
+		if (!free_unref_page_prepare(page, pfn, 0))
 			list_del(&page->lru);
 		set_page_private(page, pfn);
 	}
@@ -3140,7 +3132,7 @@ void free_unref_page_list(struct list_head *list)
 
 		set_page_private(page, 0);
 		trace_mm_page_free_batched(page);
-		free_unref_page_commit(page, pfn);
+		free_unref_page_commit(page, pfn, 0);
 
 		/*
 		 * Guard against excessive IRQ disabled times when we get
@@ -3253,7 +3245,8 @@ static inline void zone_statistics(struct zone *preferred_zone, struct zone *z)
 }
 
 /* Remove page from the per-cpu list, caller must protect the list */
-static struct page *__rmqueue_pcplist(struct zone *zone, int migratetype,
+static struct page *__rmqueue_pcplist(struct zone *zone, unsigned int order,
+			int migratetype,
 			unsigned int alloc_flags,
 			struct per_cpu_pages *pcp,
 			gfp_t gfp_flags)
@@ -3265,7 +3258,7 @@ static struct page *__rmqueue_pcplist(struct zone *zone, int migratetype,
 		/* First try to get CMA pages */
 		if (migratetype == MIGRATE_MOVABLE &&
 				gfp_flags & __GFP_CMA) {
-			list = get_populated_pcp_list(zone, 0, pcp,
+			list = get_populated_pcp_list(zone, order, pcp,
 					get_cma_migrate_type(), alloc_flags);
 		}
 
@@ -3274,7 +3267,7 @@ static struct page *__rmqueue_pcplist(struct zone *zone, int migratetype,
 			 * Either CMA is not suitable or there are no
 			 * free CMA pages.
 			 */
-			list = get_populated_pcp_list(zone, 0, pcp,
+			list = get_populated_pcp_list(zone, order, pcp,
 					migratetype, alloc_flags);
 			if (unlikely(list == NULL) ||
 					unlikely(list_empty(list)))
@@ -3284,8 +3277,8 @@ static struct page *__rmqueue_pcplist(struct zone *zone, int migratetype,
 
 		page = list_first_entry(list, struct page, lru);
 		list_del(&page->lru);
-		pcp->count--;
-	} while (check_new_pcp(page));
+		pcp->count -= 1 << order;
+	} while (check_new_pages(page, order));
 
 	return page;
 }
@@ -3302,7 +3295,7 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 
 	local_irq_save(flags);
 	pcp = &this_cpu_ptr(zone->pageset)->pcp;
-	page = __rmqueue_pcplist(zone,  migratetype, alloc_flags, pcp,
+	page = __rmqueue_pcplist(zone, order, migratetype, alloc_flags, pcp,
 				 gfp_flags);
 	if (page) {
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
@@ -3313,7 +3306,7 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 }
 
 /*
- * Allocate a page from the given zone. Use pcplists for order-0 allocations.
+ * Allocate a page from the given zone. Use pcplists for orders <= PAGE_ALLOC_COSTLY_ORDER.
  */
 static inline
 struct page *rmqueue(struct zone *preferred_zone,
@@ -3324,10 +3317,11 @@ struct page *rmqueue(struct zone *preferred_zone,
 	unsigned long flags;
 	struct page *page;
 
-	if (likely(order == 0)) {
+	if (likely(pcp_allowed_order(order))) {
 		page = rmqueue_pcplist(preferred_zone, zone, order,
 				gfp_flags, migratetype, alloc_flags);
-		goto out;
+		if (likely(page))
+			goto out;
 	}
 
 	/*
@@ -5048,8 +5042,8 @@ EXPORT_SYMBOL(get_zeroed_page);
 
 static inline void free_the_page(struct page *page, unsigned int order)
 {
-	if (order == 0)		/* Via pcp? */
-		free_unref_page(page);
+	if (pcp_allowed_order(order))		/* Via pcp */
+		free_unref_page(page, order);
 	else
 		__free_pages_ok(page, order);
 }
@@ -6290,14 +6284,14 @@ static void pageset_set_batch(struct per_cpu_pageset *p, unsigned long batch)
 static void pageset_init(struct per_cpu_pageset *p)
 {
 	struct per_cpu_pages *pcp;
-	int migratetype;
+	int pindex;
 
 	memset(p, 0, sizeof(*p));
 
 	pcp = &p->pcp;
 	pcp->count = 0;
-	for (migratetype = 0; migratetype < MIGRATE_PCPTYPES; migratetype++)
-		INIT_LIST_HEAD(&pcp->lists[migratetype]);
+	for (pindex = 0; pindex < NR_PCP_LISTS; pindex++)
+		INIT_LIST_HEAD(&pcp->lists[pindex]);
 }
 
 static void setup_pageset(struct per_cpu_pageset *p, unsigned long batch)
