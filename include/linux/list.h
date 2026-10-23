@@ -220,6 +220,16 @@ static inline int list_is_last(const struct list_head *list,
 }
 
 /**
+ * list_is_head - tests whether @list is the list @head
+ * @list: the entry to test
+ * @head: the head of the list
+ */
+static inline bool list_is_head(const struct list_head *list, const struct list_head *head)
+{
+	return list == head;
+}
+
+/**
  * list_empty - tests whether a list is empty
  * @head: the list to test.
  */
