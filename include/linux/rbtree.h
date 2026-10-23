@@ -106,11 +106,30 @@ static inline struct rb_node *rb_last(const struct rb_root *root)
 	return n;
 }
 
-extern void rb_insert_color_cached(struct rb_node *,
-				   struct rb_root_cached *, bool);
-extern void rb_erase_cached(struct rb_node *node, struct rb_root_cached *);
 /* Same as rb_first(), but O(1) */
 #define rb_first_cached(root) (root)->rb_leftmost
+
+static inline void rb_insert_color_cached(struct rb_node *node,
+					  struct rb_root_cached *root,
+					  bool leftmost)
+{
+	if (leftmost)
+		root->rb_leftmost = node;
+	rb_insert_color(node, &root->rb_root);
+}
+
+static inline struct rb_node *
+rb_erase_cached(struct rb_node *node, struct rb_root_cached *root)
+{
+	struct rb_node *leftmost = NULL;
+
+	if (root->rb_leftmost == node)
+		leftmost = root->rb_leftmost = rb_next(node);
+
+	rb_erase(node, &root->rb_root);
+
+	return leftmost;
+}
 
 /* Postorder iteration - always visit the parent after its children */
 extern struct rb_node *rb_first_postorder(const struct rb_root *);
@@ -121,8 +140,15 @@ extern void rb_replace_node(struct rb_node *victim, struct rb_node *new,
 			    struct rb_root *root);
 extern void rb_replace_node_rcu(struct rb_node *victim, struct rb_node *new,
 				struct rb_root *root);
-extern void rb_replace_node_cached(struct rb_node *victim, struct rb_node *new,
-				   struct rb_root_cached *root);
+
+static inline void rb_replace_node_cached(struct rb_node *victim,
+					  struct rb_node *new,
+					  struct rb_root_cached *root)
+{
+	if (root->rb_leftmost == victim)
+		root->rb_leftmost = new;
+	rb_replace_node(victim, new, &root->rb_root);
+}
 
 static inline void rb_link_node(struct rb_node *node, struct rb_node *parent,
 				struct rb_node **rb_link)

@@ -463,23 +463,6 @@ void rb_erase(struct rb_node *node, struct rb_root *root)
 }
 EXPORT_SYMBOL(rb_erase);
 
-void rb_insert_color_cached(struct rb_node *node,
-			    struct rb_root_cached *root, bool leftmost)
-{
-	__rb_insert(node, &root->rb_root, leftmost,
-		    &root->rb_leftmost, dummy_rotate);
-}
-EXPORT_SYMBOL(rb_insert_color_cached);
-
-void rb_erase_cached(struct rb_node *node, struct rb_root_cached *root)
-{
-	struct rb_node *rebalance;
-	rebalance = __rb_erase_augmented(node, &root->rb_root,
-					 &root->rb_leftmost, &dummy_callbacks);
-	if (rebalance)
-		____rb_erase_color(rebalance, &root->rb_root, dummy_rotate);
-}
-EXPORT_SYMBOL(rb_erase_cached);
 
 /*
  * Augmented rbtree manipulation functions.
@@ -575,15 +558,6 @@ void rb_replace_node(struct rb_node *victim, struct rb_node *new,
 }
 EXPORT_SYMBOL(rb_replace_node);
 
-void rb_replace_node_cached(struct rb_node *victim, struct rb_node *new,
-			    struct rb_root_cached *root)
-{
-	rb_replace_node(victim, new, &root->rb_root);
-
-	if (root->rb_leftmost == victim)
-		root->rb_leftmost = new;
-}
-EXPORT_SYMBOL(rb_replace_node_cached);
 
 void rb_replace_node_rcu(struct rb_node *victim, struct rb_node *new,
 			 struct rb_root *root)
