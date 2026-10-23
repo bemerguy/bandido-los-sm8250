@@ -21,9 +21,6 @@
 #include <linux/export.h>
 #include <linux/kernel.h>
 
-#if !defined(find_next_bit) || !defined(find_next_zero_bit) || \
-		!defined(find_next_and_bit)
-
 /*
  * This is a common helper function for find_next_bit, find_next_zero_bit, and
  * find_next_and_bit. The differences are:
@@ -31,7 +28,7 @@
  *    searching it for one bits.
  *  - The optional "addr2", which is anded with "addr1" if present.
  */
-static inline unsigned long _find_next_bit(const unsigned long *addr1,
+static inline unsigned long __find_next_bit(const unsigned long *addr1,
 		const unsigned long *addr2, unsigned long nbits,
 		unsigned long start, unsigned long invert)
 {
@@ -62,38 +59,29 @@ static inline unsigned long _find_next_bit(const unsigned long *addr1,
 
 	return min(start + __ffs(tmp), nbits);
 }
-#endif
 
-#ifndef find_next_bit
-/*
- * Find the next set bit in a memory region.
- */
-unsigned long find_next_bit(const unsigned long *addr, unsigned long size,
+unsigned long _find_next_bit(const unsigned long *addr, unsigned long size,
 			    unsigned long offset)
 {
-	return _find_next_bit(addr, NULL, size, offset, 0UL);
+	return __find_next_bit(addr, NULL, size, offset, 0UL);
 }
-EXPORT_SYMBOL(find_next_bit);
-#endif
+EXPORT_SYMBOL(_find_next_bit);
 
-#ifndef find_next_zero_bit
-unsigned long find_next_zero_bit(const unsigned long *addr, unsigned long size,
+unsigned long _find_next_zero_bit(const unsigned long *addr, unsigned long size,
 				 unsigned long offset)
 {
-	return _find_next_bit(addr, NULL, size, offset, ~0UL);
+	return __find_next_bit(addr, NULL, size, offset, ~0UL);
 }
-EXPORT_SYMBOL(find_next_zero_bit);
-#endif
+EXPORT_SYMBOL(_find_next_zero_bit);
 
-#if !defined(find_next_and_bit)
-unsigned long find_next_and_bit(const unsigned long *addr1,
+unsigned long _find_next_and_bit(const unsigned long *addr1,
 		const unsigned long *addr2, unsigned long size,
 		unsigned long offset)
 {
-	return _find_next_bit(addr1, addr2, size, offset, 0UL);
+	return __find_next_bit(addr1, addr2, size, offset, 0UL);
 }
-EXPORT_SYMBOL(find_next_and_bit);
-#endif
+EXPORT_SYMBOL(_find_next_and_bit);
+
 
 #ifndef find_first_bit
 /*
