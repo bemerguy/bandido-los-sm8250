@@ -281,7 +281,7 @@ static unsigned long bandido_map_util_freq(unsigned long util,
 	if (sg_cpu->dvfs_headroom_lut)
 		util = sg_cpu->dvfs_headroom_lut[min_t(unsigned long, util, SCHED_CAPACITY_SCALE)];
 
-	return mult_frac(freq, util, cap);
+	return (freq + (freq >> 2)) * util / cap;
 }
 
 static unsigned int get_next_freq(struct sugov_policy *sg_policy,
