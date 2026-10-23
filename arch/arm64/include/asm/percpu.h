@@ -49,7 +49,7 @@ static inline unsigned long __my_cpu_offset(void)
 #define __my_cpu_offset __my_cpu_offset()
 
 #define PERCPU_OP(op, asm_op)						\
-static inline unsigned long __percpu_##op(void *ptr,			\
+static __always_inline unsigned long __percpu_##op(void *ptr,		\
 			unsigned long val, int size)			\
 {									\
 	unsigned long loop, ret;					\
@@ -108,7 +108,7 @@ PERCPU_OP(and, and)
 PERCPU_OP(or, orr)
 #undef PERCPU_OP
 
-static inline unsigned long __percpu_read(void *ptr, int size)
+static __always_inline unsigned long __percpu_read(void *ptr, int size)
 {
 	unsigned long ret;
 
@@ -133,7 +133,7 @@ static inline unsigned long __percpu_read(void *ptr, int size)
 	return ret;
 }
 
-static inline void __percpu_write(void *ptr, unsigned long val, int size)
+static __always_inline void __percpu_write(void *ptr, unsigned long val, int size)
 {
 	switch (size) {
 	case 1:
@@ -153,7 +153,7 @@ static inline void __percpu_write(void *ptr, unsigned long val, int size)
 	}
 }
 
-static inline unsigned long __percpu_xchg(void *ptr, unsigned long val,
+static __always_inline unsigned long __percpu_xchg(void *ptr, unsigned long val,
 						int size)
 {
 	unsigned long ret, loop;
