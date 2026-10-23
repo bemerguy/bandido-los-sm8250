@@ -334,8 +334,9 @@ static inline bool rwsem_try_write_lock(long count, struct rw_semaphore *sem)
 			RWSEM_ACTIVE_WRITE_BIAS :
 			RWSEM_ACTIVE_WRITE_BIAS + RWSEM_WAITING_BIAS;
 
-	if (atomic_long_cmpxchg_acquire(&sem->count, RWSEM_WAITING_BIAS, count)
-							== RWSEM_WAITING_BIAS) {
+	long expected = RWSEM_WAITING_BIAS;
+
+	if (atomic_long_try_cmpxchg_acquire(&sem->count, &expected, count)) {
 		rwsem_set_owner(sem);
 		return true;
 	}
@@ -349,20 +350,17 @@ static inline bool rwsem_try_write_lock(long count, struct rw_semaphore *sem)
  */
 static inline bool rwsem_try_write_lock_unqueued(struct rw_semaphore *sem)
 {
-	long old, count = atomic_long_read(&sem->count);
+	long count = atomic_long_read(&sem->count);
 
 	while (true) {
 		if (!(count == 0 || count == RWSEM_WAITING_BIAS))
 			return false;
 
-		old = atomic_long_cmpxchg_acquire(&sem->count, count,
-				      count + RWSEM_ACTIVE_WRITE_BIAS);
-		if (old == count) {
+		if (atomic_long_try_cmpxchg_acquire(&sem->count, &count,
+				      count + RWSEM_ACTIVE_WRITE_BIAS)) {
 			rwsem_set_owner(sem);
 			return true;
 		}
-
-		count = old;
 	}
 }
 
