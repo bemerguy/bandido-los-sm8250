@@ -33,6 +33,7 @@ struct sugov_policy {
 	unsigned long		rtg_boost_util;
 	unsigned long		max;
 	unsigned long		dvfs_capacity;
+	unsigned long		target_load_thresh;
 	u16			dvfs_headroom_lut[SCHED_CAPACITY_SCALE + 1];
 
 	raw_spinlock_t		update_lock;	/* For shared policies */
@@ -196,6 +197,24 @@ static inline bool sugov_rtg_boost_active(struct sugov_cpu *sg_cpu)
 	       (rq->grp_time.curr_runnable_sum > 0 || rq->grp_time.prev_runnable_sum > 0);
 }
 
+static inline bool bandido_touch(u64 time)
+{
+#ifdef CONFIG_CPU_BOOST
+	return time < READ_ONCE(cpuboost_input_until_ns);
+#else
+	return false;
+#endif
+}
+
+/*
+ * User interaction: a touch within the cpu-boost window, or a scheduler
+ * boost requested by Android itself (perf HAL scroll/launch hints).
+ */
+static inline bool bandido_interaction(u64 time)
+{
+	return bandido_touch(time) || sched_boost() != NO_BOOST;
+}
+
 #ifdef CONFIG_BANDIDO_UI_BOOST
 static inline bool sugov_ui_active(struct sugov_cpu *sg_cpu, u64 time)
 {
@@ -213,7 +232,7 @@ static inline bool sugov_ui_active(struct sugov_cpu *sg_cpu, u64 time)
 	 * during active user interaction (touch/scroll).
 	 * If the screen is at 60Hz or idle/passive, do not extend boost.
 	 */
-	if (sched_boost() != NO_BOOST && display_is_120hz() && sg_cpu->last_ui_time &&
+	if (bandido_interaction(time) && display_is_120hz() && sg_cpu->last_ui_time &&
 	    (time - sg_cpu->last_ui_time < 32000000ULL))
 		return true;
 
@@ -234,7 +253,7 @@ static void sugov_walt_adjust(struct sugov_cpu *sg_cpu, unsigned long *util,
 	bool boost_active = sugov_rtg_boost_active(sg_cpu) || sugov_ui_active(sg_cpu, time);
 
 	if (boost_active) {
-		if (sg_policy->policy->cpu == 0 || sched_boost() != NO_BOOST)
+		if (sg_policy->policy->cpu == 0 || bandido_interaction(time))
 			*util = max(*util, sg_policy->rtg_boost_util);
 	}
 #endif
@@ -256,6 +275,9 @@ static inline unsigned long sugov_apply_dvfs_headroom(unsigned long util,
 	return capped_util + headroom;
 }
 
+/* Above this load, headroom drops to 1/16 when the user is not interacting */
+#define BANDIDO_TARGET_LOAD	60
+
 static void sugov_build_dvfs_headroom_lut(struct sugov_policy *sg_policy)
 {
 	struct cpufreq_policy *policy = sg_policy->policy;
@@ -267,6 +289,7 @@ static void sugov_build_dvfs_headroom_lut(struct sugov_policy *sg_policy)
 		return;
 
 	sg_policy->dvfs_capacity = capacity;
+	sg_policy->target_load_thresh = (capacity * BANDIDO_TARGET_LOAD) / 100;
 	threshold = (capacity * 15) / 100;
 
 	for (util = 0; util <= SCHED_CAPACITY_SCALE; util++)
@@ -276,22 +299,39 @@ static void sugov_build_dvfs_headroom_lut(struct sugov_policy *sg_policy)
 
 static unsigned long bandido_map_util_freq(unsigned long util,
 					unsigned long freq, unsigned long cap,
-					struct sugov_cpu *sg_cpu)
+					struct sugov_cpu *sg_cpu, bool interaction)
 {
-	if (sg_cpu->dvfs_headroom_lut)
-		util = sg_cpu->dvfs_headroom_lut[min_t(unsigned long, util, SCHED_CAPACITY_SCALE)];
+	unsigned long thresh;
+
+	if (interaction) {
+		if (sg_cpu->dvfs_headroom_lut)
+			util = sg_cpu->dvfs_headroom_lut[min_t(unsigned long, util, SCHED_CAPACITY_SCALE)];
+
+		return (freq + (freq >> 2)) * util / cap;
+	}
+
+	/* waltgov target_load: taper headroom near fmax when nobody is looking */
+	thresh = sg_cpu->sg_policy->target_load_thresh;
+	if (util >= thresh)
+		return max((freq + (freq >> 4)) * util,
+			   (freq + (freq >> 2)) * thresh) / cap;
 
 	return (freq + (freq >> 2)) * util / cap;
 }
 
 static unsigned int get_next_freq(struct sugov_policy *sg_policy,
-				  unsigned long util, unsigned long max)
+				  unsigned long util, unsigned long max, u64 time)
 {
 	struct cpufreq_policy *policy = sg_policy->policy;
 	unsigned int freq = arch_scale_freq_invariant() ?
 				policy->cpuinfo.max_freq : policy->cur;
 
-	freq = bandido_map_util_freq(util, freq, max, &per_cpu(sugov_cpu, policy->cpu));
+	freq = bandido_map_util_freq(util, freq, max, &per_cpu(sugov_cpu, policy->cpu),
+				     bandido_interaction(time));
+#ifdef CONFIG_CPU_BOOST
+	if (bandido_touch(time))
+		freq = max(freq, cpuboost_input_freq(policy->cpu));
+#endif
 
 	if (freq == sg_policy->cached_raw_freq && !sg_policy->need_freq_update)
 		return sg_policy->next_freq;
@@ -423,7 +463,7 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 	sugov_update_rtg_boost_util(sg_policy, max);
 	util = sugov_iowait_apply(sg_cpu, time, util, max);
 	sugov_walt_adjust(sg_cpu, &util, &max, time);
-	next_f = get_next_freq(sg_policy, util, max);
+	next_f = get_next_freq(sg_policy, util, max, time);
 
 	/*
 	 * Fast-Ramp: Bypass the rate limit if the next frequency is
@@ -464,7 +504,7 @@ static unsigned int sugov_next_freq_shared(struct sugov_cpu *sg_cpu, u64 time)
 		}
 	}
 
-	return get_next_freq(sg_policy, util, max);
+	return get_next_freq(sg_policy, util, max, time);
 }
 
 static void
@@ -569,6 +609,10 @@ static ssize_t boost_status_show(struct gov_attr_set *attr_set, char *buf)
 	struct sugov_policy *sg_policy;
 	ssize_t count = 0;
 	u64 now = ktime_get_ns();
+
+	count += scnprintf(buf + count, PAGE_SIZE - count,
+			   "touch=%d interaction=%d sched_boost=%d\n",
+			   bandido_touch(now), bandido_interaction(now), sched_boost());
 
 	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook) {
 		struct cpufreq_policy *policy = sg_policy->policy;

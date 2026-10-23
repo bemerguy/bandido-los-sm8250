@@ -36,4 +36,10 @@ static inline unsigned long map_util_freq(unsigned long util,
 }
 #endif /* CONFIG_CPU_FREQ */
 
+#ifdef CONFIG_CPU_BOOST
+/* ktime_get_ns() deadline of the current touch interaction window */
+extern u64 cpuboost_input_until_ns;
+unsigned int cpuboost_input_freq(int cpu);
+#endif
+
 #endif /* _LINUX_SCHED_CPUFREQ_H */

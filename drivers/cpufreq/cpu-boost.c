@@ -14,6 +14,7 @@
 #include <linux/input.h>
 #include <linux/time.h>
 #include <linux/sysfs.h>
+#include <linux/sched/cpufreq.h>
 
 #define cpu_boost_attr_rw(_name)		\
 static struct kobj_attribute _name##_attr =	\
@@ -38,7 +39,6 @@ const char *buf, size_t count)					\
 
 struct cpu_sync {
 	int cpu;
-	unsigned int input_boost_min;
 	unsigned int input_boost_freq;
 };
 
@@ -54,7 +54,7 @@ show_one(input_boost_ms);
 store_one(input_boost_ms);
 cpu_boost_attr_rw(input_boost_ms);
 
-static unsigned int sched_boost_on_input = 1;
+static unsigned int sched_boost_on_input;
 show_one(sched_boost_on_input);
 store_one(sched_boost_on_input);
 cpu_boost_attr_rw(sched_boost_on_input);
@@ -63,6 +63,7 @@ static bool sched_boost_active;
 
 static struct delayed_work input_boost_rem;
 static u64 last_input_time;
+u64 cpuboost_input_until_ns;
 #define MIN_INPUT_INTERVAL (150 * USEC_PER_MSEC)
 
 static ssize_t store_input_boost_freq(struct kobject *kobj,
@@ -131,69 +132,15 @@ static ssize_t show_input_boost_freq(struct kobject *kobj,
 
 cpu_boost_attr_rw(input_boost_freq);
 
-/*
- * The CPUFREQ_ADJUST notifier is used to override the current policy min to
- * make sure policy min >= boost_min. The cpufreq framework then does the job
- * of enforcing the new policy.
- */
-static int boost_adjust_notify(struct notifier_block *nb, unsigned long val,
-				void *data)
+/* Touch frequency floor, applied by the Bandido governor */
+unsigned int cpuboost_input_freq(int cpu)
 {
-	struct cpufreq_policy *policy = data;
-	unsigned int cpu = policy->cpu;
-	struct cpu_sync *s = &per_cpu(sync_info, cpu);
-	unsigned int ib_min = s->input_boost_min;
-
-	switch (val) {
-	case CPUFREQ_ADJUST:
-		if (!ib_min)
-			break;
-
-		pr_debug("CPU%u policy min before boost: %u kHz\n",
-			 cpu, policy->min);
-		pr_debug("CPU%u boost min: %u kHz\n", cpu, ib_min);
-
-		cpufreq_verify_within_limits(policy, ib_min, UINT_MAX);
-
-		pr_debug("CPU%u policy min after boost: %u kHz\n",
-			 cpu, policy->min);
-		break;
-	}
-
-	return NOTIFY_OK;
-}
-
-static struct notifier_block boost_adjust_nb = {
-	.notifier_call = boost_adjust_notify,
-};
-
-static void update_policy_online(void)
-{
-	unsigned int i;
-
-	/* Re-evaluate policy to trigger adjust notifier for online CPUs */
-	get_online_cpus();
-	for_each_online_cpu(i) {
-		pr_debug("Updating policy for CPU%d\n", i);
-		cpufreq_update_policy(i);
-	}
-	put_online_cpus();
+	return per_cpu(sync_info, cpu).input_boost_freq;
 }
 
 static void do_input_boost_rem(struct work_struct *work)
 {
-	unsigned int i, ret;
-	struct cpu_sync *i_sync_info;
-
-	/* Reset the input_boost_min for all CPUs in the system */
-	pr_debug("Resetting input boost min for all CPUs\n");
-	for_each_possible_cpu(i) {
-		i_sync_info = &per_cpu(sync_info, i);
-		i_sync_info->input_boost_min = 0;
-	}
-
-	/* Update policies for all online CPUs */
-	update_policy_online();
+	unsigned int ret;
 
 	if (sched_boost_active) {
 		ret = sched_set_boost(0);
@@ -205,24 +152,13 @@ static void do_input_boost_rem(struct work_struct *work)
 
 static void do_input_boost(struct work_struct *work)
 {
-	unsigned int i, ret;
-	struct cpu_sync *i_sync_info;
+	unsigned int ret;
 
 	cancel_delayed_work_sync(&input_boost_rem);
 	if (sched_boost_active) {
 		sched_set_boost(0);
 		sched_boost_active = false;
 	}
-
-	/* Set the input_boost_min for all CPUs in the system */
-	pr_debug("Setting input boost min for all CPUs\n");
-	for_each_possible_cpu(i) {
-		i_sync_info = &per_cpu(sync_info, i);
-		i_sync_info->input_boost_min = i_sync_info->input_boost_freq;
-	}
-
-	/* Update policies for all online CPUs */
-	update_policy_online();
 
 	/* Enable scheduler boost to migrate tasks to big cluster */
 	if (sched_boost_on_input > 0) {
@@ -245,7 +181,14 @@ static void cpuboost_input_event(struct input_handle *handle,
 	if (!input_boost_enabled)
 		return;
 
-	now = ktime_to_us(ktime_get());
+	now = ktime_get_ns();
+	WRITE_ONCE(cpuboost_input_until_ns,
+		   now + input_boost_ms * NSEC_PER_MSEC);
+
+	if (!sched_boost_on_input)
+		return;
+
+	now /= NSEC_PER_USEC;
 	if (now - last_input_time < MIN_INPUT_INTERVAL)
 		return;
 
@@ -351,7 +294,6 @@ static int cpu_boost_init(void)
 			s->input_boost_freq = 1500000;
 	}
 	input_boost_enabled = true;
-	cpufreq_register_notifier(&boost_adjust_nb, CPUFREQ_POLICY_NOTIFIER);
 
 	cpu_boost_kobj = kobject_create_and_add("cpu_boost",
 						&cpu_subsys.dev_root->kobj);
