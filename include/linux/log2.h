@@ -55,7 +55,7 @@ bool is_power_of_2(unsigned long n)
  * __roundup_pow_of_two() - round up to nearest power of two
  * @n: value to round up
  */
-static inline __attribute__((const))
+static __always_inline __attribute__((const))
 unsigned long __roundup_pow_of_two(unsigned long n)
 {
 	return 1UL << fls_long(n - 1);
@@ -65,7 +65,7 @@ unsigned long __roundup_pow_of_two(unsigned long n)
  * __rounddown_pow_of_two() - round down to nearest power of two
  * @n: value to round down
  */
-static inline __attribute__((const))
+static __always_inline __attribute__((const))
 unsigned long __rounddown_pow_of_two(unsigned long n)
 {
 	return 1UL << (fls_long(n) - 1);
