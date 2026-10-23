@@ -1680,10 +1680,12 @@ static u64 cmp_next_hrtimer_event(u64 basem, u64 expires)
  */
 bool check_pending_deferrable_timers(int cpu)
 {
+	int zero = 0;
+
 	if (cpu == tick_do_timer_cpu ||
 		tick_do_timer_cpu == TICK_DO_TIMER_NONE) {
 		if (time_after_eq(jiffies, timer_base_deferrable.clk)
-			&& !atomic_cmpxchg(&deferrable_pending, 0, 1)) {
+			&& atomic_try_cmpxchg(&deferrable_pending, &zero, 1)) {
 			return true;
 		}
 	}
@@ -1877,13 +1879,14 @@ static inline void __run_timers(struct timer_base *base)
 static __latent_entropy void run_timer_softirq(struct softirq_action *h)
 {
 	struct timer_base *base = this_cpu_ptr(&timer_bases[BASE_STD]);
+	int one = 1;
 
 	__run_timers(base);
 	if (IS_ENABLED(CONFIG_NO_HZ_COMMON)) {
 		__run_timers(this_cpu_ptr(&timer_bases[BASE_DEF]));
 	}
 
-	if ((atomic_cmpxchg(&deferrable_pending, 1, 0) &&
+	if ((atomic_try_cmpxchg(&deferrable_pending, &one, 0) &&
 		tick_do_timer_cpu == TICK_DO_TIMER_NONE) ||
 		tick_do_timer_cpu == smp_processor_id())
 		__run_timers(&timer_base_deferrable);

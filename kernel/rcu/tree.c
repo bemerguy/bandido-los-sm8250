@@ -397,15 +397,13 @@ static bool rcu_dynticks_in_eqs_since(struct rcu_dynticks *rdtp, int snap)
 bool rcu_eqs_special_set(int cpu)
 {
 	int old;
-	int new;
 	struct rcu_dynticks *rdtp = &per_cpu(rcu_dynticks, cpu);
 
+	old = atomic_read(&rdtp->dynticks);
 	do {
-		old = atomic_read(&rdtp->dynticks);
 		if (old & RCU_DYNTICK_CTRL_CTR)
 			return false;
-		new = old | RCU_DYNTICK_CTRL_MASK;
-	} while (atomic_cmpxchg(&rdtp->dynticks, old, new) != old);
+	} while (!atomic_try_cmpxchg(&rdtp->dynticks, &old, old | RCU_DYNTICK_CTRL_MASK));
 	return true;
 }
 
