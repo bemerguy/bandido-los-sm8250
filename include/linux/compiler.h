@@ -317,6 +317,44 @@ unsigned long read_word_at_a_time(const void *addr)
 	return *(unsigned long *)addr;
 }
 
+/*
+ * This returns a constant expression while determining if an argument is
+ * a constant expression, most importantly without evaluating the argument.
+ *
+ * One trick to solve this is to use the comparison:
+ *   (sizeof(int) == sizeof(*(8 ? ((void *)((long)(x) * 0l)) : (int *)8)))
+ *
+ * Here's how it works:
+ * - (long)(x) * 0l:
+ *   - When "x" is an integer constant expression (ICE), the expression
+ *     evaluates to an integer constant expression with value 0.
+ *   - When "x" is not an ICE, the expression is not an ICE, but still has
+ *     value 0.
+ * - 8 ? ((void *)((long)(x) * 0l)) : (int *)8:
+ *   - When the first operand of ":" is a null pointer constant (which is an
+ *     ICE with value 0), the conditional operator returns the type of the
+ *     other operand ("int *").
+ *   - When one operand is a void pointer (i.e. when x is not an integer
+ *     constant expression) and the other is an object pointer (i.e. our
+ *     third operand), the conditional operator returns a "void *" type.
+ *     Here, within the sizeof(), we would then get:
+ *       sizeof(*((void *)(...)) == sizeof(void) == 1
+ * - The equality comparison to "sizeof(int)" therefore depends on (x):
+ *     sizeof(int) == sizeof(int)     (x) was a constant expression
+ *     sizeof(int) != sizeof(void)    (x) was not a constant expression
+ */
+#define __is_constexpr(x) \
+	(sizeof(int) == sizeof(*(8 ? ((void *)((long)(x) * 0l)) : (int *)8)))
+
+/*
+ * Useful shorthand for "is this condition known at compile-time?"
+ *
+ * Note that the condition may involve non-constant values,
+ * but the compiler may know enough about the details of the
+ * values to determine that the condition is statically true.
+ */
+#define statically_true(x) (__builtin_constant_p(x) && (x))
+
 #endif /* __KERNEL__ */
 
 /*
