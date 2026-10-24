@@ -298,6 +298,20 @@ extern void __cant_sleep(const char *file, int line, int preempt_offset);
 	({ signed type __x = (x); __x < 0 ? -__x : __x; }), other)
 
 /**
+ * abs_diff - return absolute value of the difference between the arguments
+ * @a: first argument
+ * @b: second argument
+ *
+ * Return: an absolute value of the difference between the @a and @b.
+ */
+#define abs_diff(a, b) ({			\
+	typeof(a) __a = (a);			\
+	typeof(b) __b = (b);			\
+	(void)(&__a == &__b);			\
+	__a > __b ? (__a - __b) : (__b - __a);	\
+})
+
+/**
  * reciprocal_scale - "scale" a value into range [0, ep_ro)
  * @val: value
  * @ep_ro: right open interval endpoint
@@ -311,7 +325,7 @@ extern void __cant_sleep(const char *file, int line, int preempt_offset);
  *
  * Return: a result based on @val in interval [0, @ep_ro).
  */
-static inline u32 reciprocal_scale(u32 val, u32 ep_ro)
+static __always_inline u32 reciprocal_scale(u32 val, u32 ep_ro)
 {
 	return (u32)(((u64) val * ep_ro) >> 32);
 }
