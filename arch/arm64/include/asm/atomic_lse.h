@@ -22,13 +22,13 @@
 #define __ASM_ATOMIC_LSE_H
 
 #define ATOMIC_OP(op, asm_op)						\
-static inline void __lse_atomic_##op(int i, atomic_t *v)			\
+static __always_inline void __lse_atomic_##op(int i, atomic_t *v)	\
 {									\
 	asm volatile(							\
 	__LSE_PREAMBLE							\
 "	" #asm_op "	%w[i], %[v]\n"					\
-	: [i] "+r" (i), [v] "+Q" (v->counter)				\
-	: "r" (v));							\
+	: [v] "+Q" (v->counter)						\
+	: [i] "r" (i));							\
 }
 
 ATOMIC_OP(andnot, stclr)
@@ -175,13 +175,13 @@ ATOMIC_FETCH_OP_SUB(        , al, "memory")
 #undef ATOMIC_FETCH_OP_SUB
 
 #define ATOMIC64_OP(op, asm_op)						\
-static inline void __lse_atomic64_##op(s64 i, atomic64_t *v)		\
+static __always_inline void __lse_atomic64_##op(s64 i, atomic64_t *v)	\
 {									\
 	asm volatile(							\
 	__LSE_PREAMBLE							\
 "	" #asm_op "	%[i], %[v]\n"					\
-	: [i] "+r" (i), [v] "+Q" (v->counter)				\
-	: "r" (v));							\
+	: [v] "+Q" (v->counter)						\
+	: [i] "r" (i));							\
 }
 
 ATOMIC64_OP(andnot, stclr)
