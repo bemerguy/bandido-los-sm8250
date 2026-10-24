@@ -138,7 +138,7 @@ enum pageflags {
 
 struct page;	/* forward declaration */
 
-static inline struct page *compound_head(struct page *page)
+static __always_inline struct page *compound_head(struct page *page)
 {
 	unsigned long head = READ_ONCE(page->compound_head);
 
@@ -158,7 +158,7 @@ static __always_inline int PageCompound(struct page *page)
 }
 
 #define	PAGE_POISON_PATTERN	-1l
-static inline int PagePoisoned(const struct page *page)
+static __always_inline int PagePoisoned(const struct page *page)
 {
 	return page->flags == PAGE_POISON_PATTERN;
 }
