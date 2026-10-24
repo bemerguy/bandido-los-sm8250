@@ -159,7 +159,7 @@ static inline unsigned raw_read_seqcount_begin(const seqcount_t *s)
  * Validity of the critical section is tested by checking read_seqcount_retry
  * function.
  */
-static inline unsigned read_seqcount_begin(const seqcount_t *s)
+static __always_inline unsigned read_seqcount_begin(const seqcount_t *s)
 {
 	seqcount_lockdep_reader_access(s);
 	return raw_read_seqcount_begin(s);
@@ -179,7 +179,7 @@ static inline unsigned read_seqcount_begin(const seqcount_t *s)
  * read_seqcount_retry() instead of stabilizing at the beginning of the
  * critical section.
  */
-static inline unsigned raw_seqcount_begin(const seqcount_t *s)
+static __always_inline unsigned raw_seqcount_begin(const seqcount_t *s)
 {
 	unsigned ret = READ_ONCE(s->sequence);
 	smp_rmb();
@@ -200,7 +200,7 @@ static inline unsigned raw_seqcount_begin(const seqcount_t *s)
  * Use carefully, only in critical code, and comment how the barrier is
  * provided.
  */
-static inline int __read_seqcount_retry(const seqcount_t *s, unsigned start)
+static __always_inline int __read_seqcount_retry(const seqcount_t *s, unsigned start)
 {
 	return unlikely(s->sequence != start);
 }
@@ -215,7 +215,7 @@ static inline int __read_seqcount_retry(const seqcount_t *s, unsigned start)
  * If the critical section was invalid, it must be ignored (and typically
  * retried).
  */
-static inline int read_seqcount_retry(const seqcount_t *s, unsigned start)
+static __always_inline int read_seqcount_retry(const seqcount_t *s, unsigned start)
 {
 	smp_rmb();
 	return __read_seqcount_retry(s, start);
@@ -435,12 +435,12 @@ typedef struct {
 /*
  * Read side functions for starting and finalizing a read side section.
  */
-static inline unsigned read_seqbegin(const seqlock_t *sl)
+static __always_inline unsigned read_seqbegin(const seqlock_t *sl)
 {
 	return read_seqcount_begin(&sl->seqcount);
 }
 
-static inline unsigned read_seqretry(const seqlock_t *sl, unsigned start)
+static __always_inline unsigned read_seqretry(const seqlock_t *sl, unsigned start)
 {
 	return read_seqcount_retry(&sl->seqcount, start);
 }
