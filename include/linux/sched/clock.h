@@ -40,12 +40,12 @@ static inline void sched_clock_idle_wakeup_event(void)
 {
 }
 
-static inline u64 cpu_clock(int cpu)
+static __always_inline u64 cpu_clock(int cpu)
 {
 	return sched_clock();
 }
 
-static inline u64 local_clock(void)
+static __always_inline u64 local_clock(void)
 {
 	return sched_clock();
 }
@@ -74,12 +74,12 @@ extern void sched_clock_idle_wakeup_event(void);
  * # go backwards !!                                                  #
  * ####################################################################
  */
-static inline u64 cpu_clock(int cpu)
+static __always_inline u64 cpu_clock(int cpu)
 {
 	return sched_clock_cpu(cpu);
 }
 
-static inline u64 local_clock(void)
+static __always_inline u64 local_clock(void)
 {
 	return sched_clock_cpu(raw_smp_processor_id());
 }
