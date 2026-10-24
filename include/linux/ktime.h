@@ -34,7 +34,7 @@ typedef s64	ktime_t;
  *
  * Return: The ktime_t representation of the value.
  */
-static inline ktime_t ktime_set(const s64 secs, const unsigned long nsecs)
+static __always_inline ktime_t ktime_set(const s64 secs, const unsigned long nsecs)
 {
 	if (unlikely(secs >= KTIME_SEC_MAX))
 		return KTIME_MAX;
@@ -67,19 +67,19 @@ static inline ktime_t ktime_set(const s64 secs, const unsigned long nsecs)
 #define ktime_sub_ns(kt, nsval)		((kt) - (nsval))
 
 /* convert a timespec to ktime_t format: */
-static inline ktime_t timespec_to_ktime(struct timespec ts)
+static __always_inline ktime_t timespec_to_ktime(struct timespec ts)
 {
 	return ktime_set(ts.tv_sec, ts.tv_nsec);
 }
 
 /* convert a timespec64 to ktime_t format: */
-static inline ktime_t timespec64_to_ktime(struct timespec64 ts)
+static __always_inline ktime_t timespec64_to_ktime(struct timespec64 ts)
 {
 	return ktime_set(ts.tv_sec, ts.tv_nsec);
 }
 
 /* convert a timeval to ktime_t format: */
-static inline ktime_t timeval_to_ktime(struct timeval tv)
+static __always_inline ktime_t timeval_to_ktime(struct timeval tv)
 {
 	return ktime_set(tv.tv_sec, tv.tv_usec * NSEC_PER_USEC);
 }
@@ -94,7 +94,7 @@ static inline ktime_t timeval_to_ktime(struct timeval tv)
 #define ktime_to_timeval(kt)		ns_to_timeval((kt))
 
 /* Convert ktime_t to nanoseconds */
-static inline s64 ktime_to_ns(const ktime_t kt)
+static __always_inline s64 ktime_to_ns(const ktime_t kt)
 {
 	return kt;
 }
@@ -109,7 +109,7 @@ static inline s64 ktime_to_ns(const ktime_t kt)
  *   cmp1 == cmp2: return 0
  *   cmp1  > cmp2: return >0
  */
-static inline int ktime_compare(const ktime_t cmp1, const ktime_t cmp2)
+static __always_inline int ktime_compare(const ktime_t cmp1, const ktime_t cmp2)
 {
 	if (cmp1 < cmp2)
 		return -1;
@@ -125,7 +125,7 @@ static inline int ktime_compare(const ktime_t cmp1, const ktime_t cmp2)
  *
  * Return: true if cmp1 happened after cmp2.
  */
-static inline bool ktime_after(const ktime_t cmp1, const ktime_t cmp2)
+static __always_inline bool ktime_after(const ktime_t cmp1, const ktime_t cmp2)
 {
 	return ktime_compare(cmp1, cmp2) > 0;
 }
@@ -137,7 +137,7 @@ static inline bool ktime_after(const ktime_t cmp1, const ktime_t cmp2)
  *
  * Return: true if cmp1 happened before cmp2.
  */
-static inline bool ktime_before(const ktime_t cmp1, const ktime_t cmp2)
+static __always_inline bool ktime_before(const ktime_t cmp1, const ktime_t cmp2)
 {
 	return ktime_compare(cmp1, cmp2) < 0;
 }
@@ -162,7 +162,7 @@ static inline s64 ktime_divns(const ktime_t kt, s64 div)
 	}
 }
 #else /* BITS_PER_LONG < 64 */
-static inline s64 ktime_divns(const ktime_t kt, s64 div)
+static __always_inline s64 ktime_divns(const ktime_t kt, s64 div)
 {
 	/*
 	 * 32-bit implementation cannot handle negative divisors,
@@ -173,42 +173,42 @@ static inline s64 ktime_divns(const ktime_t kt, s64 div)
 }
 #endif
 
-static inline s64 ktime_to_us(const ktime_t kt)
+static __always_inline s64 ktime_to_us(const ktime_t kt)
 {
 	return ktime_divns(kt, NSEC_PER_USEC);
 }
 
-static inline s64 ktime_to_ms(const ktime_t kt)
+static __always_inline s64 ktime_to_ms(const ktime_t kt)
 {
 	return ktime_divns(kt, NSEC_PER_MSEC);
 }
 
-static inline s64 ktime_us_delta(const ktime_t later, const ktime_t earlier)
+static __always_inline s64 ktime_us_delta(const ktime_t later, const ktime_t earlier)
 {
        return ktime_to_us(ktime_sub(later, earlier));
 }
 
-static inline s64 ktime_ms_delta(const ktime_t later, const ktime_t earlier)
+static __always_inline s64 ktime_ms_delta(const ktime_t later, const ktime_t earlier)
 {
 	return ktime_to_ms(ktime_sub(later, earlier));
 }
 
-static inline ktime_t ktime_add_us(const ktime_t kt, const u64 usec)
+static __always_inline ktime_t ktime_add_us(const ktime_t kt, const u64 usec)
 {
 	return ktime_add_ns(kt, usec * NSEC_PER_USEC);
 }
 
-static inline ktime_t ktime_add_ms(const ktime_t kt, const u64 msec)
+static __always_inline ktime_t ktime_add_ms(const ktime_t kt, const u64 msec)
 {
 	return ktime_add_ns(kt, msec * NSEC_PER_MSEC);
 }
 
-static inline ktime_t ktime_sub_us(const ktime_t kt, const u64 usec)
+static __always_inline ktime_t ktime_sub_us(const ktime_t kt, const u64 usec)
 {
 	return ktime_sub_ns(kt, usec * NSEC_PER_USEC);
 }
 
-static inline ktime_t ktime_sub_ms(const ktime_t kt, const u64 msec)
+static __always_inline ktime_t ktime_sub_ms(const ktime_t kt, const u64 msec)
 {
 	return ktime_sub_ns(kt, msec * NSEC_PER_MSEC);
 }
