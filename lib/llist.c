@@ -28,27 +28,6 @@
 
 
 /**
- * llist_add_batch - add several linked entries in batch
- * @new_first:	first entry in batch to be added
- * @new_last:	last entry in batch to be added
- * @head:	the head for your lock-less list
- *
- * Return whether list is empty before adding.
- */
-bool llist_add_batch(struct llist_node *new_first, struct llist_node *new_last,
-		     struct llist_head *head)
-{
-	struct llist_node *first;
-
-	do {
-		new_last->next = first = READ_ONCE(head->first);
-	} while (cmpxchg(&head->first, first, new_first) != first);
-
-	return !first;
-}
-EXPORT_SYMBOL_GPL(llist_add_batch);
-
-/**
  * llist_del_first - delete the first entry of lock-less list
  * @head:	the head for your lock-less list
  *
