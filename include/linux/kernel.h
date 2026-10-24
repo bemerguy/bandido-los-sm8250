@@ -992,6 +992,20 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
  */
 #define clamp_val(val, lo, hi) clamp_t(typeof(val), val, lo, hi)
 
+/**
+ * umin - return minimum of two non-negative values
+ * @x: first value
+ * @y: second value
+ */
+#define umin(x, y) min((x) + 0u + 0ul + 0ull, (y) + 0u + 0ul + 0ull)
+
+/**
+ * umax - return maximum of two non-negative values
+ * @x: first value
+ * @y: second value
+ */
+#define umax(x, y) max((x) + 0u + 0ul + 0ull, (y) + 0u + 0ul + 0ull)
+
 
 /**
  * swap - swap values of @a and @b
