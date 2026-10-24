@@ -67,7 +67,7 @@ extern int bit_wait_io_timeout(struct wait_bit_key *key, int mode);
  * if the process received a signal and the mode permitted wakeup
  * on that signal.
  */
-static inline int
+static __always_inline int
 wait_on_bit(unsigned long *word, int bit, unsigned mode)
 {
 	might_sleep();
@@ -92,7 +92,7 @@ wait_on_bit(unsigned long *word, int bit, unsigned mode)
  * if the process received a signal and the mode permitted wakeup
  * on that signal.
  */
-static inline int
+static __always_inline int
 wait_on_bit_io(unsigned long *word, int bit, unsigned mode)
 {
 	might_sleep();
@@ -175,7 +175,7 @@ wait_on_bit_action(unsigned long *word, int bit, wait_bit_action_f *action,
  * set.  Returns non-zero if a signal was delivered to the process and
  * the @mode allows that signal to wake the process.
  */
-static inline int
+static __always_inline int
 wait_on_bit_lock(unsigned long *word, int bit, unsigned mode)
 {
 	might_sleep();
@@ -199,7 +199,7 @@ wait_on_bit_lock(unsigned long *word, int bit, unsigned mode)
  * set.  Returns non-zero if a signal was delivered to the process and
  * the @mode allows that signal to wake the process.
  */
-static inline int
+static __always_inline int
 wait_on_bit_lock_io(unsigned long *word, int bit, unsigned mode)
 {
 	might_sleep();
