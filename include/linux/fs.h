@@ -1319,7 +1319,7 @@ static inline void show_fd_locks(struct seq_file *f,
 			struct file *filp, struct files_struct *files) {}
 #endif /* !CONFIG_FILE_LOCKING */
 
-static inline struct inode *file_inode(const struct file *f)
+static __always_inline struct inode *file_inode(const struct file *f)
 {
 	return f->f_inode;
 }
