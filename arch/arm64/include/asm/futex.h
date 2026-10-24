@@ -31,7 +31,6 @@ do {									\
 									\
 	uaccess_enable();						\
 	asm volatile(							\
-"	prfm	pstl1strm, %2\n"					\
 "1:	ldxr	%w1, %2\n"						\
 	insn "\n"							\
 "2:	stlxr	%w0, %w3, %2\n"						\
@@ -107,7 +106,6 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *_uaddr,
 	uaddr = __uaccess_mask_ptr(_uaddr);
 	uaccess_enable();
 	asm volatile("// futex_atomic_cmpxchg_inatomic\n"
-"	prfm	pstl1strm, %2\n"
 "1:	ldxr	%w1, %2\n"
 "	eor	%w3, %w1, %w5\n"
 "	cbnz	%w3, 4f\n"
