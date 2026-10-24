@@ -31,14 +31,14 @@ extern struct mm_struct *mm_alloc(void);
  * See also <Documentation/vm/active_mm.rst> for an in-depth explanation
  * of &mm_struct.mm_count vs &mm_struct.mm_users.
  */
-static inline void mmgrab(struct mm_struct *mm)
+static __always_inline void mmgrab(struct mm_struct *mm)
 {
 	atomic_inc(&mm->mm_count);
 }
 
 extern void __mmdrop(struct mm_struct *mm);
 
-static inline void mmdrop(struct mm_struct *mm)
+static __always_inline void mmdrop(struct mm_struct *mm)
 {
 	/*
 	 * The implicit full barrier implied by atomic_dec_and_test() is
@@ -48,8 +48,6 @@ static inline void mmdrop(struct mm_struct *mm)
 	if (unlikely(atomic_dec_and_test(&mm->mm_count)))
 		__mmdrop(mm);
 }
-
-void mmdrop(struct mm_struct *mm);
 
 /*
  * This has to be called after a get_task_mm()/mmget_not_zero()
