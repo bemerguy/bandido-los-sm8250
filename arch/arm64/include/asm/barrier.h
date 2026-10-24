@@ -50,7 +50,7 @@
  * and 0 otherwise.
  */
 #define array_index_mask_nospec array_index_mask_nospec
-static inline unsigned long array_index_mask_nospec(unsigned long idx,
+static __always_inline unsigned long array_index_mask_nospec(unsigned long idx,
 						    unsigned long sz)
 {
 	unsigned long mask;
