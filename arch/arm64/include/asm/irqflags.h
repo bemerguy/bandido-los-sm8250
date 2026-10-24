@@ -36,7 +36,7 @@
 /*
  * CPU interrupt mask handling.
  */
-static inline unsigned long arch_local_irq_save(void)
+static __always_inline unsigned long arch_local_irq_save(void)
 {
 	unsigned long flags;
 	asm volatile(
@@ -48,7 +48,7 @@ static inline unsigned long arch_local_irq_save(void)
 	return flags;
 }
 
-static inline void arch_local_irq_enable(void)
+static __always_inline void arch_local_irq_enable(void)
 {
 	asm volatile(
 		"msr	daifclr, #2		// arch_local_irq_enable"
@@ -57,7 +57,7 @@ static inline void arch_local_irq_enable(void)
 		: "memory");
 }
 
-static inline void arch_local_irq_disable(void)
+static __always_inline void arch_local_irq_disable(void)
 {
 	asm volatile(
 		"msr	daifset, #2		// arch_local_irq_disable"
@@ -69,7 +69,7 @@ static inline void arch_local_irq_disable(void)
 /*
  * Save the current interrupt enable state.
  */
-static inline unsigned long arch_local_save_flags(void)
+static __always_inline unsigned long arch_local_save_flags(void)
 {
 	unsigned long flags;
 	asm volatile(
@@ -83,7 +83,7 @@ static inline unsigned long arch_local_save_flags(void)
 /*
  * restore saved IRQ state
  */
-static inline void arch_local_irq_restore(unsigned long flags)
+static __always_inline void arch_local_irq_restore(unsigned long flags)
 {
 	asm volatile(
 		"msr	daif, %0		// arch_local_irq_restore"
@@ -92,7 +92,7 @@ static inline void arch_local_irq_restore(unsigned long flags)
 	: "memory");
 }
 
-static inline int arch_irqs_disabled_flags(unsigned long flags)
+static __always_inline bool arch_irqs_disabled_flags(unsigned long flags)
 {
 	return flags & PSR_I_BIT;
 }
