@@ -409,22 +409,22 @@ enum node_states {
 extern nodemask_t node_states[NR_NODE_STATES];
 
 #if MAX_NUMNODES > 1
-static inline int node_state(int node, enum node_states state)
+static __always_inline int node_state(int node, enum node_states state)
 {
 	return node_isset(node, node_states[state]);
 }
 
-static inline void node_set_state(int node, enum node_states state)
+static __always_inline void node_set_state(int node, enum node_states state)
 {
 	__node_set(node, &node_states[state]);
 }
 
-static inline void node_clear_state(int node, enum node_states state)
+static __always_inline void node_clear_state(int node, enum node_states state)
 {
 	__node_clear(node, &node_states[state]);
 }
 
-static inline int num_node_state(enum node_states state)
+static __always_inline int num_node_state(enum node_states state)
 {
 	return nodes_weight(node_states[state]);
 }
@@ -434,11 +434,11 @@ static inline int num_node_state(enum node_states state)
 
 #define first_online_node	first_node(node_states[N_ONLINE])
 #define first_memory_node	first_node(node_states[N_MEMORY])
-static inline unsigned int next_online_node(int nid)
+static __always_inline unsigned int next_online_node(int nid)
 {
 	return next_node(nid, node_states[N_ONLINE]);
 }
-static inline unsigned int next_memory_node(int nid)
+static __always_inline unsigned int next_memory_node(int nid)
 {
 	return next_node(nid, node_states[N_MEMORY]);
 }
@@ -446,13 +446,13 @@ static inline unsigned int next_memory_node(int nid)
 extern int nr_node_ids;
 extern int nr_online_nodes;
 
-static inline void node_set_online(int nid)
+static __always_inline void node_set_online(int nid)
 {
 	node_set_state(nid, N_ONLINE);
 	nr_online_nodes = num_node_state(N_ONLINE);
 }
 
-static inline void node_set_offline(int nid)
+static __always_inline void node_set_offline(int nid)
 {
 	node_clear_state(nid, N_ONLINE);
 	nr_online_nodes = num_node_state(N_ONLINE);
@@ -460,20 +460,20 @@ static inline void node_set_offline(int nid)
 
 #else
 
-static inline int node_state(int node, enum node_states state)
+static __always_inline int node_state(int node, enum node_states state)
 {
 	return node == 0;
 }
 
-static inline void node_set_state(int node, enum node_states state)
+static __always_inline void node_set_state(int node, enum node_states state)
 {
 }
 
-static inline void node_clear_state(int node, enum node_states state)
+static __always_inline void node_clear_state(int node, enum node_states state)
 {
 }
 
-static inline int num_node_state(enum node_states state)
+static __always_inline int num_node_state(enum node_states state)
 {
 	return 1;
 }
