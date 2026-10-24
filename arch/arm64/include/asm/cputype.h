@@ -244,27 +244,27 @@ is_midr_in_range_list(u32 midr, struct midr_range const *ranges)
  * compiler that it's constant.  Use this function to read the CPU ID
  * rather than directly reading processor_id or read_cpuid() directly.
  */
-static inline u32 __attribute_const__ read_cpuid_id(void)
+static __always_inline u32 __attribute_const__ read_cpuid_id(void)
 {
 	return read_cpuid(MIDR_EL1);
 }
 
-static inline u64 __attribute_const__ read_cpuid_mpidr(void)
+static __always_inline u64 __attribute_const__ read_cpuid_mpidr(void)
 {
 	return read_cpuid(MPIDR_EL1);
 }
 
-static inline unsigned int __attribute_const__ read_cpuid_implementor(void)
+static __always_inline unsigned int __attribute_const__ read_cpuid_implementor(void)
 {
 	return MIDR_IMPLEMENTOR(read_cpuid_id());
 }
 
-static inline unsigned int __attribute_const__ read_cpuid_part_number(void)
+static __always_inline unsigned int __attribute_const__ read_cpuid_part_number(void)
 {
 	return MIDR_PARTNUM(read_cpuid_id());
 }
 
-static inline u32 __attribute_const__ read_cpuid_cachetype(void)
+static __always_inline u32 __attribute_const__ read_cpuid_cachetype(void)
 {
 	return read_cpuid(CTR_EL0);
 }
