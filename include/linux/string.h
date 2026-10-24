@@ -118,7 +118,7 @@ extern void *memset32(uint32_t *, uint32_t, __kernel_size_t);
 extern void *memset64(uint64_t *, uint64_t, __kernel_size_t);
 #endif
 
-static inline void *memset_l(unsigned long *p, unsigned long v,
+static __always_inline void *memset_l(unsigned long *p, unsigned long v,
 		__kernel_size_t n)
 {
 	if (BITS_PER_LONG == 32)
@@ -127,7 +127,7 @@ static inline void *memset_l(unsigned long *p, unsigned long v,
 		return memset64((uint64_t *)p, v, n);
 }
 
-static inline void *memset_p(void **p, void *v, __kernel_size_t n)
+static __always_inline void *memset_p(void **p, void *v, __kernel_size_t n)
 {
 	if (BITS_PER_LONG == 32)
 		return memset32((uint32_t *)p, (uintptr_t)v, n);
