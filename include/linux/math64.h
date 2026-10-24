@@ -22,7 +22,7 @@
  * This is commonly provided by 32bit archs to provide an optimized 64bit
  * divide.
  */
-static inline u64 div_u64_rem(u64 dividend, u32 divisor, u32 *remainder)
+static __always_inline u64 div_u64_rem(u64 dividend, u32 divisor, u32 *remainder)
 {
 	*remainder = dividend % divisor;
 	return dividend / divisor;
@@ -36,7 +36,7 @@ static inline u64 div_u64_rem(u64 dividend, u32 divisor, u32 *remainder)
  *
  * Return: sets ``*remainder``, then returns dividend / divisor
  */
-static inline s64 div_s64_rem(s64 dividend, s32 divisor, s32 *remainder)
+static __always_inline s64 div_s64_rem(s64 dividend, s32 divisor, s32 *remainder)
 {
 	*remainder = dividend % divisor;
 	return dividend / divisor;
@@ -50,7 +50,7 @@ static inline s64 div_s64_rem(s64 dividend, s32 divisor, s32 *remainder)
  *
  * Return: sets ``*remainder``, then returns dividend / divisor
  */
-static inline u64 div64_u64_rem(u64 dividend, u64 divisor, u64 *remainder)
+static __always_inline u64 div64_u64_rem(u64 dividend, u64 divisor, u64 *remainder)
 {
 	*remainder = dividend % divisor;
 	return dividend / divisor;
@@ -63,7 +63,7 @@ static inline u64 div64_u64_rem(u64 dividend, u64 divisor, u64 *remainder)
  *
  * Return: dividend / divisor
  */
-static inline u64 div64_u64(u64 dividend, u64 divisor)
+static __always_inline u64 div64_u64(u64 dividend, u64 divisor)
 {
 	return dividend / divisor;
 }
@@ -75,7 +75,7 @@ static inline u64 div64_u64(u64 dividend, u64 divisor)
  *
  * Return: dividend / divisor
  */
-static inline s64 div64_s64(s64 dividend, s64 divisor)
+static __always_inline s64 div64_s64(s64 dividend, s64 divisor)
 {
 	return dividend / divisor;
 }
