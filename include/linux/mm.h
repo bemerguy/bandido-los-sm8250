@@ -1227,12 +1227,12 @@ static inline void page_kasan_tag_set(struct page *page, u8 tag) { }
 static inline void page_kasan_tag_reset(struct page *page) { }
 #endif
 
-static inline struct zone *page_zone(const struct page *page)
+static __always_inline struct zone *page_zone(const struct page *page)
 {
 	return &NODE_DATA(page_to_nid(page))->node_zones[page_zonenum(page)];
 }
 
-static inline pg_data_t *page_pgdat(const struct page *page)
+static __always_inline pg_data_t *page_pgdat(const struct page *page)
 {
 	return NODE_DATA(page_to_nid(page));
 }
