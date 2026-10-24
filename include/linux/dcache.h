@@ -451,6 +451,11 @@ static inline bool d_is_negative(const struct dentry *dentry)
 	return d_is_miss(dentry);
 }
 
+static __always_inline bool d_flags_negative(unsigned flags)
+{
+	return (flags & DCACHE_ENTRY_TYPE) == DCACHE_MISS_TYPE;
+}
+
 static inline bool d_is_positive(const struct dentry *dentry)
 {
 	return !d_is_negative(dentry);
@@ -471,7 +476,7 @@ static inline bool d_is_positive(const struct dentry *dentry)
  * the inode.  (3) The dentry may have something attached to ->d_lower and the
  * type field of the flags may be set to something other than miss or whiteout.
  */
-static inline bool d_really_is_negative(const struct dentry *dentry)
+static __always_inline bool d_really_is_negative(const struct dentry *dentry)
 {
 	return dentry->d_inode == NULL;
 }
@@ -489,7 +494,7 @@ static inline bool d_really_is_negative(const struct dentry *dentry)
  * dentries.  (2) It should also be used in combination with d_inode() to get
  * the inode.
  */
-static inline bool d_really_is_positive(const struct dentry *dentry)
+static __always_inline bool d_really_is_positive(const struct dentry *dentry)
 {
 	return dentry->d_inode != NULL;
 }
@@ -521,7 +526,7 @@ static inline unsigned long vfs_pressure_ratio(unsigned long val)
  * This is the helper normal filesystems should use to get at their own inodes
  * in their own dentries and ignore the layering superimposed upon them.
  */
-static inline struct inode *d_inode(const struct dentry *dentry)
+static __always_inline struct inode *d_inode(const struct dentry *dentry)
 {
 	return dentry->d_inode;
 }
@@ -533,7 +538,7 @@ static inline struct inode *d_inode(const struct dentry *dentry)
  * This is the helper normal filesystems should use to get at their own inodes
  * in their own dentries and ignore the layering superimposed upon them.
  */
-static inline struct inode *d_inode_rcu(const struct dentry *dentry)
+static __always_inline struct inode *d_inode_rcu(const struct dentry *dentry)
 {
 	return READ_ONCE(dentry->d_inode);
 }
