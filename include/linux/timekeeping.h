@@ -74,12 +74,12 @@ extern u32 ktime_get_resolution_ns(void);
 /**
  * ktime_get_real - get the real (wall-) time in ktime_t format
  */
-static inline ktime_t ktime_get_real(void)
+static __always_inline ktime_t ktime_get_real(void)
 {
 	return ktime_get_with_offset(TK_OFFS_REAL);
 }
 
-static inline ktime_t ktime_get_coarse_real(void)
+static __always_inline ktime_t ktime_get_coarse_real(void)
 {
 	return ktime_get_coarse_with_offset(TK_OFFS_REAL);
 }
@@ -90,12 +90,12 @@ static inline ktime_t ktime_get_coarse_real(void)
  * This is similar to CLOCK_MONTONIC/ktime_get, but also includes the
  * time spent in suspend.
  */
-static inline ktime_t ktime_get_boottime(void)
+static __always_inline ktime_t ktime_get_boottime(void)
 {
 	return ktime_get_with_offset(TK_OFFS_BOOT);
 }
 
-static inline ktime_t ktime_get_coarse_boottime(void)
+static __always_inline ktime_t ktime_get_coarse_boottime(void)
 {
 	return ktime_get_coarse_with_offset(TK_OFFS_BOOT);
 }
@@ -103,17 +103,17 @@ static inline ktime_t ktime_get_coarse_boottime(void)
 /**
  * ktime_get_clocktai - Returns the TAI time of day in ktime_t format
  */
-static inline ktime_t ktime_get_clocktai(void)
+static __always_inline ktime_t ktime_get_clocktai(void)
 {
 	return ktime_get_with_offset(TK_OFFS_TAI);
 }
 
-static inline ktime_t ktime_get_coarse_clocktai(void)
+static __always_inline ktime_t ktime_get_coarse_clocktai(void)
 {
 	return ktime_get_coarse_with_offset(TK_OFFS_TAI);
 }
 
-static inline ktime_t ktime_get_coarse(void)
+static __always_inline ktime_t ktime_get_coarse(void)
 {
 	struct timespec64 ts;
 
@@ -121,22 +121,22 @@ static inline ktime_t ktime_get_coarse(void)
 	return timespec64_to_ktime(ts);
 }
 
-static inline u64 ktime_get_coarse_ns(void)
+static __always_inline u64 ktime_get_coarse_ns(void)
 {
 	return ktime_to_ns(ktime_get_coarse());
 }
 
-static inline u64 ktime_get_coarse_real_ns(void)
+static __always_inline u64 ktime_get_coarse_real_ns(void)
 {
 	return ktime_to_ns(ktime_get_coarse_real());
 }
 
-static inline u64 ktime_get_coarse_boottime_ns(void)
+static __always_inline u64 ktime_get_coarse_boottime_ns(void)
 {
 	return ktime_to_ns(ktime_get_coarse_boottime());
 }
 
-static inline u64 ktime_get_coarse_clocktai_ns(void)
+static __always_inline u64 ktime_get_coarse_clocktai_ns(void)
 {
 	return ktime_to_ns(ktime_get_coarse_clocktai());
 }
@@ -144,32 +144,32 @@ static inline u64 ktime_get_coarse_clocktai_ns(void)
 /**
  * ktime_mono_to_real - Convert monotonic time to clock realtime
  */
-static inline ktime_t ktime_mono_to_real(ktime_t mono)
+static __always_inline ktime_t ktime_mono_to_real(ktime_t mono)
 {
 	return ktime_mono_to_any(mono, TK_OFFS_REAL);
 }
 
-static inline u64 ktime_get_ns(void)
+static __always_inline u64 ktime_get_ns(void)
 {
 	return ktime_to_ns(ktime_get());
 }
 
-static inline u64 ktime_get_real_ns(void)
+static __always_inline u64 ktime_get_real_ns(void)
 {
 	return ktime_to_ns(ktime_get_real());
 }
 
-static inline u64 ktime_get_boottime_ns(void)
+static __always_inline u64 ktime_get_boottime_ns(void)
 {
 	return ktime_to_ns(ktime_get_boottime());
 }
 
-static inline u64 ktime_get_clocktai_ns(void)
+static __always_inline u64 ktime_get_clocktai_ns(void)
 {
 	return ktime_to_ns(ktime_get_clocktai());
 }
 
-static inline u64 ktime_get_raw_ns(void)
+static __always_inline u64 ktime_get_raw_ns(void)
 {
 	return ktime_to_ns(ktime_get_raw());
 }
