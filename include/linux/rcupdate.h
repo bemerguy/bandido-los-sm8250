@@ -76,12 +76,12 @@ void synchronize_rcu(void);
 
 #else /* #ifdef CONFIG_PREEMPT_RCU */
 
-static inline void __rcu_read_lock(void)
+static __always_inline void __rcu_read_lock(void)
 {
 	preempt_disable();
 }
 
-static inline void __rcu_read_unlock(void)
+static __always_inline void __rcu_read_unlock(void)
 {
 	preempt_enable();
 }
@@ -728,7 +728,7 @@ static __always_inline void rcu_read_lock(void)
  *
  * See rcu_read_lock() for more information.
  */
-static inline void rcu_read_unlock(void)
+static __always_inline void rcu_read_unlock(void)
 {
 	RCU_LOCKDEP_WARN(!rcu_is_watching(),
 			 "rcu_read_unlock() used illegally while idle");
@@ -754,7 +754,7 @@ static inline void rcu_read_unlock(void)
  * rcu_read_unlock_bh() from one task if the matching rcu_read_lock_bh()
  * was invoked from some other task.
  */
-static inline void rcu_read_lock_bh(void)
+static __always_inline void rcu_read_lock_bh(void)
 {
 	local_bh_disable();
 	__acquire(RCU_BH);
@@ -768,7 +768,7 @@ static inline void rcu_read_lock_bh(void)
  *
  * See rcu_read_lock_bh() for more information.
  */
-static inline void rcu_read_unlock_bh(void)
+static __always_inline void rcu_read_unlock_bh(void)
 {
 	RCU_LOCKDEP_WARN(!rcu_is_watching(),
 			 "rcu_read_unlock_bh() used illegally while idle");
@@ -790,7 +790,7 @@ static inline void rcu_read_unlock_bh(void)
  * rcu_read_unlock_sched() from process context if the matching
  * rcu_read_lock_sched() was invoked from an NMI handler.
  */
-static inline void rcu_read_lock_sched(void)
+static __always_inline void rcu_read_lock_sched(void)
 {
 	preempt_disable();
 	__acquire(RCU_SCHED);
@@ -811,7 +811,7 @@ static inline notrace void rcu_read_lock_sched_notrace(void)
  *
  * See rcu_read_lock_sched for more information.
  */
-static inline void rcu_read_unlock_sched(void)
+static __always_inline void rcu_read_unlock_sched(void)
 {
 	RCU_LOCKDEP_WARN(!rcu_is_watching(),
 			 "rcu_read_unlock_sched() used illegally while idle");
