@@ -199,7 +199,7 @@ unsigned long __rounddown_pow_of_two(unsigned long n)
 	__rounddown_pow_of_two(n)		\
  )
 
-static inline __attribute_const__
+static __always_inline __attribute_const__
 int __order_base_2(unsigned long n)
 {
 	return n > 1 ? ilog2(n - 1) + 1 : 0;
@@ -226,7 +226,7 @@ int __order_base_2(unsigned long n)
 	__order_base_2(n)			\
 )
 
-static inline __attribute__((const))
+static __always_inline __attribute__((const))
 int __bits_per(unsigned long n)
 {
 	if (n < 2)
