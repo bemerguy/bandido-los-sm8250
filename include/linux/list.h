@@ -202,8 +202,8 @@ static inline void list_move_tail(struct list_head *list,
  * @list: the entry to test
  * @head: the head of the list
  */
-static inline int list_is_first(const struct list_head *list,
-					const struct list_head *head)
+static __always_inline bool list_is_first(const struct list_head *list,
+					  const struct list_head *head)
 {
 	return list->prev == head;
 }
@@ -213,8 +213,8 @@ static inline int list_is_first(const struct list_head *list,
  * @list: the entry to test
  * @head: the head of the list
  */
-static inline int list_is_last(const struct list_head *list,
-				const struct list_head *head)
+static __always_inline bool list_is_last(const struct list_head *list,
+					 const struct list_head *head)
 {
 	return list->next == head;
 }
@@ -224,7 +224,7 @@ static inline int list_is_last(const struct list_head *list,
  * @list: the entry to test
  * @head: the head of the list
  */
-static inline bool list_is_head(const struct list_head *list, const struct list_head *head)
+static __always_inline bool list_is_head(const struct list_head *list, const struct list_head *head)
 {
 	return list == head;
 }
@@ -526,7 +526,7 @@ static inline void list_splice_tail_init(struct list_head *list,
  * @member:	the name of the list_head within the struct.
  */
 #define list_entry_is_head(pos, head, member)				\
-	(&pos->member == (head))
+	list_is_head(&pos->member, (head))
 
 /**
  * list_for_each_entry	-	iterate over list of given type
