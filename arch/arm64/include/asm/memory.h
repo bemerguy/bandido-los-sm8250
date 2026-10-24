@@ -296,13 +296,13 @@ extern phys_addr_t __phys_addr_symbol(unsigned long x);
  * DMA support - see dma-mapping.h.
  */
 #define virt_to_phys virt_to_phys
-static inline phys_addr_t virt_to_phys(const volatile void *x)
+static __always_inline phys_addr_t virt_to_phys(const volatile void *x)
 {
 	return __virt_to_phys((unsigned long)(x));
 }
 
 #define phys_to_virt phys_to_virt
-static inline void *phys_to_virt(phys_addr_t x)
+static __always_inline void *phys_to_virt(phys_addr_t x)
 {
 	return (void *)(__phys_to_virt(x));
 }
