@@ -1924,7 +1924,7 @@ extern struct thread_info init_thread_info;
 extern unsigned long init_stack[THREAD_SIZE / sizeof(unsigned long)];
 
 #ifdef CONFIG_THREAD_INFO_IN_TASK
-static inline struct thread_info *task_thread_info(struct task_struct *task)
+static __always_inline struct thread_info *task_thread_info(struct task_struct *task)
 {
 	return &task->thread_info;
 }
