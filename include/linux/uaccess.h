@@ -183,7 +183,7 @@ static __always_inline void pagefault_disabled_dec(void)
  * User access methods will not sleep when called from a pagefault_disabled()
  * environment.
  */
-static inline void pagefault_disable(void)
+static __always_inline void pagefault_disable(void)
 {
 	pagefault_disabled_inc();
 	/*
@@ -193,7 +193,7 @@ static inline void pagefault_disable(void)
 	barrier();
 }
 
-static inline void pagefault_enable(void)
+static __always_inline void pagefault_enable(void)
 {
 	/*
 	 * make sure to issue those last loads/stores before enabling
