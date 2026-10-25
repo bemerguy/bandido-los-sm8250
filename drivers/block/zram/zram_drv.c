@@ -41,6 +41,7 @@
 #include <linux/swap.h>
 #include <linux/swapops.h>
 #include <linux/compat.h>
+#include <linux/lz4.h>
 #include <uapi/linux/falloc.h>
 #include <uapi/linux/sched/types.h>
 
@@ -48,6 +49,13 @@
 #include "../loop.h"
 
 #define NON_LRU_SWAPPINESS 99
+
+/* Idle page recompression with LZ4HC, only while the screen is off */
+#define ZRAM_RECOMP_INTERVAL	msecs_to_jiffies(5000)
+#define ZRAM_RECOMP_BUDGET	msecs_to_jiffies(1000)	/* max time per run */
+#define ZRAM_RECOMP_MIN_AGE	msecs_to_jiffies(60000)	/* gap between sweeps */
+
+extern bool lcd_is_on;
 
 static DEFINE_IDR(zram_index_idr);
 /* idr index must be protected */
@@ -2509,6 +2517,8 @@ static void zram_free_page(struct zram *zram, size_t index)
 	if (zram_test_flag(zram, index, ZRAM_IDLE))
 		zram_clear_flag(zram, index, ZRAM_IDLE);
 
+	zram_clear_flag(zram, index, ZRAM_RECOMP);
+
 	if (zram_test_flag(zram, index, ZRAM_HUGE)) {
 		zram_clear_flag(zram, index, ZRAM_HUGE);
 		atomic64_dec(&zram->stats.huge_pages);
@@ -2913,6 +2923,133 @@ out:
 }
 
 /*
+ * Recompress an idle slot with LZ4HC. Its output is plain LZ4, so the read
+ * path is unchanged. Returns true if compression work was done.
+ */
+static bool zram_recompress_slot(struct zram *zram, u32 index)
+{
+	struct zram_entry *entry, *new_entry;
+	unsigned int old_len, new_len;
+	void *src_buf = zram->recomp_buf;
+	void *dst_buf = zram->recomp_buf + PAGE_SIZE;
+	void *mem;
+	int ret = 0;
+
+	if (!zram_slot_trylock(zram, index))
+		return false;
+
+	entry = zram_get_entry(zram, index);
+	if (!entry || zram_test_flag(zram, index, ZRAM_SAME) ||
+	    zram_test_flag(zram, index, ZRAM_WB) ||
+	    zram_test_flag(zram, index, ZRAM_UNDER_WB) ||
+	    zram_test_flag(zram, index, ZRAM_RECOMP))
+		goto out_unlock;
+
+	/* First pass marks the slot, the next one finds it still untouched */
+	if (!zram_test_flag(zram, index, ZRAM_IDLE)) {
+		zram_set_flag(zram, index, ZRAM_IDLE);
+		goto out_unlock;
+	}
+
+	old_len = zram_get_obj_size(zram, index);
+	mem = zs_map_object(zram->mem_pool,
+			    zram_entry_handle(zram, entry), ZS_MM_RO);
+	if (old_len == PAGE_SIZE) {
+		memcpy(src_buf, mem, PAGE_SIZE);
+	} else {
+		struct zcomp_strm *zstrm = zcomp_stream_get(zram->comp);
+
+		ret = zcomp_decompress(zstrm, mem, old_len, src_buf);
+		zcomp_stream_put(zram->comp);
+	}
+	zs_unmap_object(zram->mem_pool, zram_entry_handle(zram, entry));
+
+	/* Cleared by zram_free_page() if the slot changes while unlocked */
+	zram_set_flag(zram, index, ZRAM_RECOMP);
+	zram_slot_unlock(zram, index);
+
+	if (ret)
+		return true;
+
+	new_len = LZ4_compress_HC(src_buf, dst_buf, PAGE_SIZE,
+				  min_t(unsigned int, old_len, huge_class_size) - 1,
+				  LZ4HC_DEFAULT_CLEVEL, zram->recomp_wrkmem);
+	if (!new_len)
+		return true;
+
+	new_entry = zram_entry_alloc(zram, new_len,
+				     __GFP_KSWAPD_RECLAIM |
+				     __GFP_NOWARN |
+				     __GFP_HIGHMEM |
+				     __GFP_MOVABLE |
+				     __GFP_CMA);
+	if (!new_entry)
+		return true;
+
+	mem = zs_map_object(zram->mem_pool,
+			    zram_entry_handle(zram, new_entry), ZS_MM_WO);
+	memcpy(mem, dst_buf, new_len);
+	zs_unmap_object(zram->mem_pool, zram_entry_handle(zram, new_entry));
+
+	zram_slot_lock(zram, index);
+	if (!zram_test_flag(zram, index, ZRAM_RECOMP)) {
+		zram_slot_unlock(zram, index);
+		zram_entry_free(zram, new_entry);
+		return true;
+	}
+
+	zram_entry_free(zram, entry);
+	atomic64_sub(old_len - new_len, &zram->stats.compr_data_size);
+	if (old_len == PAGE_SIZE) {
+		zram_clear_flag(zram, index, ZRAM_HUGE);
+		atomic64_dec(&zram->stats.huge_pages);
+	}
+	zram_set_entry(zram, index, new_entry);
+	zram_set_obj_size(zram, index, new_len);
+	zram_slot_unlock(zram, index);
+	return true;
+
+out_unlock:
+	zram_slot_unlock(zram, index);
+	return false;
+}
+
+static void zram_recomp_work(struct work_struct *work)
+{
+	struct zram *zram = container_of(to_delayed_work(work), struct zram,
+					 recomp_work);
+	unsigned long nr_pages = zram->disksize >> PAGE_SHIFT;
+	unsigned long deadline = jiffies + ZRAM_RECOMP_BUDGET;
+	bool recomped = false;
+	u32 index = zram->recomp_index;
+
+	if (zram_dedup_enabled(zram))
+		return;
+
+	if (time_before(jiffies, zram->recomp_next))
+		goto out;
+
+	while (time_before(jiffies, deadline) && !READ_ONCE(lcd_is_on)) {
+		if (index >= nr_pages) {
+			/* Slots marked idle in this sweep stay untouched MIN_AGE */
+			index = 0;
+			zram->recomp_next = jiffies + ZRAM_RECOMP_MIN_AGE;
+			break;
+		}
+		recomped |= zram_recompress_slot(zram, index++);
+		cond_resched();
+	}
+	zram->recomp_index = index;
+
+	/* Freed objects only return memory once their zspages are empty */
+	if (recomped)
+		zs_compact(zram->mem_pool);
+out:
+	queue_delayed_work(system_freezable_power_efficient_wq,
+			   &zram->recomp_work, ZRAM_RECOMP_INTERVAL);
+}
+
+/*
  * zram_bio_discard - handler on discard request
  * @index: physical block index in PAGE_SIZE units
  * @offset: byte offset within physical block
@@ -3130,6 +3267,8 @@ static void zram_reset_device(struct zram *zram)
 	struct zcomp *comp;
 	u64 disksize;
 
+	cancel_delayed_work_sync(&zram->recomp_work);
+
 	down_write(&zram->init_lock);
 
 	zram->limit_pages = 0;
@@ -3151,6 +3290,11 @@ static void zram_reset_device(struct zram *zram)
 	zram_meta_free(zram, disksize);
 	memset(&zram->stats, 0, sizeof(zram->stats));
 	zcomp_destroy(comp);
+	vfree(zram->recomp_wrkmem);
+	zram->recomp_wrkmem = NULL;
+	kfree(zram->recomp_buf);
+	zram->recomp_buf = NULL;
+	zram->recomp_index = 0;
 	reset_bdev(zram);
 }
 
@@ -3192,6 +3336,14 @@ static ssize_t disksize_store(struct device *dev,
 	zram->comp = comp;
 	zram->disksize = disksize;
 	set_capacity(zram->disk, zram->disksize >> SECTOR_SHIFT);
+
+	zram->recomp_wrkmem = vmalloc(LZ4HC_MEM_COMPRESS);
+	zram->recomp_buf = kmalloc(2 * PAGE_SIZE, GFP_KERNEL);
+	if (zram->recomp_wrkmem && zram->recomp_buf) {
+		zram->recomp_next = jiffies;
+		queue_delayed_work(system_freezable_power_efficient_wq,
+				   &zram->recomp_work, ZRAM_RECOMP_INTERVAL);
+	}
 
 	revalidate_disk(zram->disk);
 	up_write(&zram->init_lock);
@@ -3350,6 +3502,7 @@ static int zram_add(void)
 	device_id = ret;
 
 	init_rwsem(&zram->init_lock);
+	INIT_DEFERRABLE_WORK(&zram->recomp_work, zram_recomp_work);
 #ifdef CONFIG_ZRAM_WRITEBACK
 	spin_lock_init(&zram->wb_limit_lock);
 #endif

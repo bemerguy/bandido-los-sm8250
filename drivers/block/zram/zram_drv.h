@@ -20,6 +20,7 @@
 #include <linux/crypto.h>
 #include <linux/mm.h>
 #include <linux/spinlock.h>
+#include <linux/workqueue.h>
 
 #include "zcomp.h"
 #include "zram_dedup.h"
@@ -58,6 +59,7 @@ enum zram_pageflags {
 	ZRAM_PPR,
 	ZRAM_UNDER_PPR,
 	ZRAM_LRU,
+	ZRAM_RECOMP,	/* recompression tried or in progress */
 
 	__NR_ZRAM_PAGEFLAGS,
 };
@@ -200,6 +202,11 @@ struct zram {
 	 */
 	bool claim; /* Protected by bdev->bd_mutex */
 	bool use_dedup;
+	struct delayed_work recomp_work;
+	void *recomp_wrkmem;
+	void *recomp_buf;	/* decompressed page + LZ4HC output */
+	u32 recomp_index;
+	unsigned long recomp_next;	/* jiffies when the next sweep may start */
 	struct file *backing_dev;
 #ifdef CONFIG_ZRAM_WRITEBACK
 	spinlock_t wb_limit_lock;
