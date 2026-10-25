@@ -346,15 +346,6 @@ unsigned long read_word_at_a_time(const void *addr)
 #define __is_constexpr(x) \
 	(sizeof(int) == sizeof(*(8 ? ((void *)((long)(x) * 0l)) : (int *)8)))
 
-/*
- * Useful shorthand for "is this condition known at compile-time?"
- *
- * Note that the condition may involve non-constant values,
- * but the compiler may know enough about the details of the
- * values to determine that the condition is statically true.
- */
-#define statically_true(x) (__builtin_constant_p(x) && (x))
-
 #endif /* __KERNEL__ */
 
 /*

@@ -146,13 +146,6 @@ static inline u64 get_jiffies_64(void)
 	 time_before_eq64(a, c))
 
 /*
- * Calculate whether a is in the range of [b, c).
- */
-#define time_in_range_open64(a, b, c) \
-	(time_after_eq64(a, b) && \
-	 time_before64(a, c))
-
-/*
  * These four macros compare jiffies and 'a' for convenience.
  */
 

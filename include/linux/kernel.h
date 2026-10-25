@@ -31,7 +31,6 @@
 #define ALIGN_DOWN(x, a)	__ALIGN_KERNEL((x) - ((a) - 1), (a))
 #define __ALIGN_MASK(x, mask)	__ALIGN_KERNEL_MASK((x), (mask))
 #define PTR_ALIGN(p, a)		((typeof(p))ALIGN((unsigned long)(p), (a)))
-#define PTR_ALIGN_DOWN(p, a)	((typeof(p))ALIGN_DOWN((unsigned long)(p), (a)))
 #define IS_ALIGNED(x, a)		(((x) & ((typeof(x))(a) - 1)) == 0)
 
 /* generic data direction definitions */
@@ -85,18 +84,6 @@
  * declared instance of @t.
  */
 #define FIELD_SIZEOF(t, f) (sizeof(((t*)0)->f))
-
-/**
- * DIV_ROUND_UP_POW2 - divide and round up
- * @n: numerator
- * @d: denominator (must be a power of 2)
- *
- * Divides @n by @d and rounds up to next multiple of @d (which must be a power
- * of 2). Avoids integer overflows that may occur with __KERNEL_DIV_ROUND_UP().
- * Performance is roughly equivalent to __KERNEL_DIV_ROUND_UP().
- */
-#define DIV_ROUND_UP_POW2(n, d) \
-	((n) / (d) + !!((n) & ((d) - 1)))
 
 #define DIV_ROUND_UP __KERNEL_DIV_ROUND_UP
 
@@ -222,21 +209,6 @@
  */
 #define lower_32_bits(n) ((u32)(n))
 
-/**
- * REPEAT_BYTE_U32 - repeat the value @x multiple times as a u32 value
- * @x: value to repeat
- *
- * NOTE: @x is not checked for > 0xff; larger values produce odd results.
- */
-#define REPEAT_BYTE_U32(x)	lower_32_bits(REPEAT_BYTE(x))
-
-/* Set bits in the first 'n' bytes when loaded from memory */
-#ifdef __LITTLE_ENDIAN
-#  define aligned_byte_mask(n) ((1UL << 8*(n))-1)
-#else
-#  define aligned_byte_mask(n) (~0xffUL << (BITS_PER_LONG - 8 - 8*(n)))
-#endif
-
 struct completion;
 struct pt_regs;
 struct user;
@@ -314,20 +286,6 @@ extern void __cant_sleep(const char *file, int line, int preempt_offset);
 	__builtin_types_compatible_p(typeof(x),   signed type) ||	\
 	__builtin_types_compatible_p(typeof(x), unsigned type),		\
 	({ signed type __x = (x); __x < 0 ? -__x : __x; }), other)
-
-/**
- * abs_diff - return absolute value of the difference between the arguments
- * @a: first argument
- * @b: second argument
- *
- * Return: an absolute value of the difference between the @a and @b.
- */
-#define abs_diff(a, b) ({			\
-	typeof(a) __a = (a);			\
-	typeof(b) __b = (b);			\
-	(void)(&__a == &__b);			\
-	__a > __b ? (__a - __b) : (__b - __a);	\
-})
 
 /**
  * reciprocal_scale - "scale" a value into range [0, ep_ro)
@@ -885,14 +843,6 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
 #define __typecheck(x, y) \
 		(!!(sizeof((typeof(x) *)1 == (typeof(y) *)1)))
 
-/*
- * This returns a constant expression while determining if an argument is
- * a constant expression, most importantly without evaluating the argument.
- * Glory to Martin Uecker <Martin.Uecker@med.uni-goettingen.de>
- */
-#define __is_constexpr(x) \
-	(sizeof(int) == sizeof(*(8 ? ((void *)((long)(x) * 0l)) : (int *)8)))
-
 #define __no_side_effects(x, y) \
 		(__is_constexpr(x) && __is_constexpr(y))
 
@@ -1009,20 +959,6 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
  * integer type.
  */
 #define clamp_val(val, lo, hi) clamp_t(typeof(val), val, lo, hi)
-
-/**
- * umin - return minimum of two non-negative values
- * @x: first value
- * @y: second value
- */
-#define umin(x, y) min((x) + 0u + 0ul + 0ull, (y) + 0u + 0ul + 0ull)
-
-/**
- * umax - return maximum of two non-negative values
- * @x: first value
- * @y: second value
- */
-#define umax(x, y) max((x) + 0u + 0ul + 0ull, (y) + 0u + 0ul + 0ull)
 
 
 /**

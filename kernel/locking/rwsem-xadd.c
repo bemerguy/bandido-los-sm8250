@@ -320,6 +320,8 @@ EXPORT_SYMBOL(rwsem_down_read_failed_killable);
  */
 static inline bool rwsem_try_write_lock(long count, struct rw_semaphore *sem)
 {
+	long expected = RWSEM_WAITING_BIAS;
+
 	/*
 	 * Avoid trying to acquire write lock if count isn't RWSEM_WAITING_BIAS.
 	 */
@@ -333,8 +335,6 @@ static inline bool rwsem_try_write_lock(long count, struct rw_semaphore *sem)
 	count = list_is_singular(&sem->wait_list) ?
 			RWSEM_ACTIVE_WRITE_BIAS :
 			RWSEM_ACTIVE_WRITE_BIAS + RWSEM_WAITING_BIAS;
-
-	long expected = RWSEM_WAITING_BIAS;
 
 	if (atomic_long_try_cmpxchg_acquire(&sem->count, &expected, count)) {
 		rwsem_set_owner(sem);

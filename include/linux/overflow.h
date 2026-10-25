@@ -384,18 +384,4 @@ static __always_inline size_t __must_check size_sub(size_t minuend, size_t subtr
 		sizeof(*(p)) + flex_array_size(p, member, count),	\
 		size_add(sizeof(*(p)), flex_array_size(p, member, count)))
 
-/**
- * struct_size_t() - Calculate size of structure with trailing flexible array
- * @type: structure type name.
- * @member: Name of the array member.
- * @count: Number of elements in the array.
- *
- * Calculates size of memory needed for structure @type followed by an
- * array of @count number of @member elements.
- *
- * Return: number of bytes needed or SIZE_MAX on overflow.
- */
-#define struct_size_t(type, member, count)					\
-	struct_size((type *)NULL, member, count)
-
 #endif /* __LINUX_OVERFLOW_H */

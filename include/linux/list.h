@@ -520,21 +520,6 @@ static inline void list_splice_tail_init(struct list_head *list,
 	     pos = n, n = pos->prev)
 
 /**
- * list_count_nodes - count nodes in the list
- * @head:	the head for your list.
- */
-static inline size_t list_count_nodes(const struct list_head *head)
-{
-	const struct list_head *pos;
-	size_t count = 0;
-
-	list_for_each(pos, head)
-		count++;
-
-	return count;
-}
-
-/**
  * list_entry_is_head - test if the entry points to the head of the list
  * @pos:	the type * to cursor
  * @head:	the head for your list.
@@ -885,20 +870,5 @@ static inline void hlist_move_list(struct hlist_head *old,
 	for (pos = hlist_entry_safe((head)->first, typeof(*pos), member);\
 	     pos && ({ n = pos->member.next; 1; });			\
 	     pos = hlist_entry_safe(n, typeof(*pos), member))
-
-/**
- * hlist_count_nodes - count nodes in the hlist
- * @head:	the head for your hlist.
- */
-static inline size_t hlist_count_nodes(const struct hlist_head *head)
-{
-	const struct hlist_node *pos;
-	size_t count = 0;
-
-	hlist_for_each(pos, head)
-		count++;
-
-	return count;
-}
 
 #endif
