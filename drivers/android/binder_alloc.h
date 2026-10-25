@@ -108,7 +108,7 @@ struct binder_lru_page {
  * struct binder_buffer objects used to track the user buffers
  */
 struct binder_alloc {
-	struct mutex mutex;
+	spinlock_t lock;
 	struct vm_area_struct *vma;
 	struct mm_struct *vma_vm_mm;
 	void __user *buffer;
@@ -167,9 +167,9 @@ binder_alloc_get_free_async_space(struct binder_alloc *alloc)
 {
 	size_t free_async_space;
 
-	mutex_lock(&alloc->mutex);
+	spin_lock(&alloc->lock);
 	free_async_space = alloc->free_async_space;
-	mutex_unlock(&alloc->mutex);
+	spin_unlock(&alloc->lock);
 	return free_async_space;
 }
 
