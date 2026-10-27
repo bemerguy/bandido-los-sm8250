@@ -2398,7 +2398,27 @@ static DEVICE_ATTR_RO(mm_stat);
 #ifdef CONFIG_ZRAM_WRITEBACK
 static DEVICE_ATTR_RW(bd_stat);
 #endif
+static ssize_t recomp_stat_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct zram *zram = dev_to_zram(dev);
+	ssize_t ret;
+
+	down_read(&zram->init_lock);
+	ret = scnprintf(buf, PAGE_SIZE,
+			"recomp_pages:       %llu\n"
+			"recomp_saved_bytes: %llu\n"
+			"recomp_sweeps:      %llu\n",
+			(u64)atomic64_read(&zram->stats.recomp_pages),
+			(u64)atomic64_read(&zram->stats.recomp_saved_bytes),
+			(u64)atomic64_read(&zram->stats.recomp_sweeps));
+	up_read(&zram->init_lock);
+
+	return ret;
+}
+
 static DEVICE_ATTR_RO(debug_stat);
+static DEVICE_ATTR_RO(recomp_stat);
 
 static unsigned long zram_entry_handle(struct zram *zram,
 		struct zram_entry *entry)
@@ -3000,6 +3020,8 @@ static bool zram_recompress_slot(struct zram *zram, u32 index)
 
 	zram_entry_free(zram, entry);
 	atomic64_sub(old_len - new_len, &zram->stats.compr_data_size);
+	atomic64_inc(&zram->stats.recomp_pages);
+	atomic64_add(old_len - new_len, &zram->stats.recomp_saved_bytes);
 	if (old_len == PAGE_SIZE) {
 		zram_clear_flag(zram, index, ZRAM_HUGE);
 		atomic64_dec(&zram->stats.huge_pages);
@@ -3034,6 +3056,7 @@ static void zram_recomp_work(struct work_struct *work)
 			/* Slots marked idle in this sweep stay untouched MIN_AGE */
 			index = 0;
 			zram->recomp_next = jiffies + ZRAM_RECOMP_MIN_AGE;
+			atomic64_inc(&zram->stats.recomp_sweeps);
 			break;
 		}
 		recomped |= zram_recompress_slot(zram, index++);
@@ -3470,6 +3493,7 @@ static struct attribute *zram_disk_attrs[] = {
 	&dev_attr_bd_stat.attr,
 #endif
 	&dev_attr_debug_stat.attr,
+	&dev_attr_recomp_stat.attr,
 	NULL,
 };
 

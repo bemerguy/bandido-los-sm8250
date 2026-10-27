@@ -130,6 +130,9 @@ struct zram_stats {
 					 * duplicated
 					 */
 	atomic64_t meta_data_size;	/* size of zram_entries */
+	atomic64_t recomp_pages;	/* no. of pages recompressed with LZ4HC */
+	atomic64_t recomp_saved_bytes;	/* bytes saved by LZ4HC recompression */
+	atomic64_t recomp_sweeps;	/* full sweeps of disk completed */
 };
 
 #ifdef CONFIG_ZRAM_LRU_WRITEBACK
