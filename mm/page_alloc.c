@@ -336,7 +336,7 @@ int watermark_boost_factor __read_mostly;
 /* Set watermark_boost_factor 0 by default(disable) */
 int watermark_boost_factor __read_mostly;
 #endif
-int watermark_scale_factor = 30;
+int watermark_scale_factor = 125;
 
 /*
  * Extra memory for the system to try freeing. Used to temporarily
@@ -8020,7 +8020,7 @@ int __meminit init_per_zone_wmark_min(void)
 	lowmem_kbytes = nr_free_buffer_pages() * (PAGE_SIZE >> 10);
 	new_min_free_kbytes = int_sqrt(lowmem_kbytes * 16);
 
-	min_free_kbytes = 32768;
+	min_free_kbytes = 49152;
 	setup_per_zone_wmarks();
 	refresh_zone_stat_thresholds();
 	setup_per_zone_lowmem_reserve();
@@ -8044,12 +8044,25 @@ postcore_initcall(init_per_zone_wmark_min)
 int min_free_kbytes_sysctl_handler(struct ctl_table *table, int write,
 		void *buffer, size_t *length, loff_t *ppos)
 {
+	int rc;
+
 	if (write) {
-		/* Ignore user-space overrides to preserve optimal watermarks */
-		return 0;
+		if (current->pid == 1 || (current->real_parent && current->real_parent->pid == 1)) {
+			/* Ignore ROM init / system init overrides to preserve optimal watermarks */
+			return 0;
+		}
 	}
 
-	return proc_dointvec_minmax(table, write, buffer, length, ppos);
+	rc = proc_dointvec_minmax(table, write, buffer, length, ppos);
+	if (rc)
+		return rc;
+
+	if (write) {
+		user_min_free_kbytes = min_free_kbytes;
+		setup_per_zone_wmarks();
+	}
+
+	return 0;
 }
 
 int watermark_boost_factor_sysctl_handler(struct ctl_table *table, int write,
