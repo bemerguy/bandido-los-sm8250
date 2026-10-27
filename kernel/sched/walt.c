@@ -210,6 +210,12 @@ static inline void walt_irq_work_queue(struct irq_work *work)
 		irq_work_queue_on(work, cpumask_any(cpu_online_mask));
 }
 
+/* Re-evaluate cpufreq on all clusters now instead of at the next rollover */
+void walt_cpufreq_kick(void)
+{
+	walt_irq_work_queue(&walt_migration_irq_work);
+}
+
 void inc_rq_walt_stats(struct rq *rq, struct task_struct *p)
 {
 	inc_nr_big_task(&rq->walt_stats, p);
@@ -508,6 +514,16 @@ static inline bool should_apply_suh_freq_boost(struct sched_cluster *cluster)
 	return is_cluster_hosting_top_app(cluster);
 }
 
+/* Touch window: aggregate the frame group load to predict the incoming work */
+static inline bool walt_touch_active(void)
+{
+#ifdef CONFIG_CPU_BOOST
+	return sched_ktime_clock() < READ_ONCE(cpuboost_input_until_ns);
+#else
+	return false;
+#endif
+}
+
 static inline u64 freq_policy_load(struct rq *rq)
 {
 	unsigned int reporting_policy = sysctl_sched_freq_reporting_policy;
@@ -521,7 +537,7 @@ static inline u64 freq_policy_load(struct rq *rq)
 		goto done;
 	}
 
-	if (sched_freq_aggr_en)
+	if (sched_freq_aggr_en || walt_touch_active())
 		load = rq->prev_runnable_sum + aggr_grp_load;
 	else
 		load = rq->prev_runnable_sum + rq->grp_time.prev_runnable_sum;

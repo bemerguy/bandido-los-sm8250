@@ -597,6 +597,7 @@ extern u32 sched_get_init_task_load(struct task_struct *p);
 extern void sched_update_cpu_freq_min_max(const cpumask_t *cpus, u32 fmin,
 					  u32 fmax);
 extern int sched_set_boost(int enable);
+extern void walt_cpufreq_kick(void);
 extern void free_task_load_ptrs(struct task_struct *p);
 extern void sched_set_refresh_rate(enum fps fps);
 extern bool display_is_120hz(void);
@@ -667,6 +668,7 @@ static inline int sched_set_boost(int enable)
 {
 	return -EINVAL;
 }
+static inline void walt_cpufreq_kick(void) { }
 static inline void free_task_load_ptrs(struct task_struct *p) { }
 
 static inline void sched_update_cpu_freq_min_max(const cpumask_t *cpus,

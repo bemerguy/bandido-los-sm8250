@@ -177,13 +177,19 @@ static void cpuboost_input_event(struct input_handle *handle,
 		unsigned int type, unsigned int code, int value)
 {
 	u64 now;
+	bool kick;
 
 	if (!input_boost_enabled)
 		return;
 
 	now = ktime_get_ns();
+	kick = now >= READ_ONCE(cpuboost_input_until_ns);
 	WRITE_ONCE(cpuboost_input_until_ns,
 		   now + input_boost_ms * NSEC_PER_MSEC);
+
+	/* New touch window: apply the frequency floor right now */
+	if (kick)
+		walt_cpufreq_kick();
 
 	if (!sched_boost_on_input)
 		return;
