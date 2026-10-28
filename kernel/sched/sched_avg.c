@@ -34,6 +34,25 @@ static DEFINE_PER_CPU(atomic64_t, busy_hyst_end_time) = ATOMIC64_INIT(0);
 static DEFINE_PER_CPU(u64, hyst_time);
 
 #define NR_THRESHOLD_PCT		15
+
+/*
+ * Busy hysteresis keeps gold/prime out of deep idle right after they were
+ * busy. Apply it only while the user interacts (touch window or sched_boost)
+ * instead of whatever the ROM writes to sched_busy_hyst_ns, which on some
+ * ROMs holds it on permanently.
+ */
+#define BUSY_HYST_CPUS		0xF0
+#define BUSY_HYST_NS		(5 * NSEC_PER_MSEC)
+
+static inline bool busy_hyst_interaction(bool is_sched_boost)
+{
+#ifdef CONFIG_CPU_BOOST
+	if (sched_ktime_clock() < READ_ONCE(cpuboost_input_until_ns))
+		return true;
+#endif
+	return is_sched_boost;
+}
+
 #define MAX_RTGB_TIME (sysctl_sched_coloc_busy_hyst_max_ms * NSEC_PER_MSEC)
 
 /**
@@ -114,22 +133,16 @@ EXPORT_SYMBOL(sched_get_nr_running_avg);
 
 void sched_update_hyst_times(void)
 {
-	u64 std_time, rtgb_time;
 	bool rtgb_active;
 	int cpu;
 
 	rtgb_active = is_rtgb_active() && (sched_boost() != CONSERVATIVE_BOOST)
 			&& (get_rtgb_active_time() < MAX_RTGB_TIME);
 
-	for_each_possible_cpu(cpu) {
-		std_time = (BIT(cpu)
-			     & sysctl_sched_busy_hyst_enable_cpus) ?
-			     sysctl_sched_busy_hyst : 0;
-		rtgb_time = ((BIT(cpu)
+	for_each_possible_cpu(cpu)
+		per_cpu(hyst_time, cpu) = ((BIT(cpu)
 			     & sysctl_sched_coloc_busy_hyst_enable_cpus)
 			     && rtgb_active) ? sysctl_sched_coloc_busy_hyst : 0;
-		per_cpu(hyst_time, cpu) = max(std_time, rtgb_time);
-	}
 }
 
 #define BUSY_NR_RUN		3
@@ -139,11 +152,12 @@ static inline void update_busy_hyst_end_time(int cpu, bool dequeue,
 {
 	bool nr_run_trigger = false, load_trigger = false;
 	bool is_sched_boost = false;
+	u64 hyst = per_cpu(hyst_time, cpu);
 
 	if (sysctl_sched_boost > 0)
 		is_sched_boost = true;
 
-	if (!per_cpu(hyst_time, cpu))
+	if (!hyst && !(BIT(cpu) & BUSY_HYST_CPUS))
 		return;
 
 	if (prev_nr_run >= BUSY_NR_RUN && per_cpu(nr, cpu) < BUSY_NR_RUN)
@@ -153,9 +167,15 @@ static inline void update_busy_hyst_end_time(int cpu, bool dequeue,
 			capacity_orig_of(cpu))
 		load_trigger = true;
 
-	if (nr_run_trigger || load_trigger || is_sched_boost)
+	if (!(nr_run_trigger || load_trigger || is_sched_boost))
+		return;
+
+	if ((BIT(cpu) & BUSY_HYST_CPUS) && busy_hyst_interaction(is_sched_boost))
+		hyst = max_t(u64, hyst, BUSY_HYST_NS);
+
+	if (hyst)
 		atomic64_set(&per_cpu(busy_hyst_end_time, cpu),
-				curr_time + per_cpu(hyst_time, cpu));
+				curr_time + hyst);
 }
 
 /**
