@@ -32,6 +32,10 @@
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
+#ifdef CONFIG_BANDIDO_UI_BOOST
+/* Read by every CPU on each freq update: keep it off shared hot lines */
+u64 bandido_ui_seen_ns __cacheline_aligned_in_smp;
+#endif
 
 
 /*

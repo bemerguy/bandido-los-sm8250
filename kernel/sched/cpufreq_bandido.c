@@ -215,6 +215,19 @@ static inline bool bandido_interaction(u64 time)
 	return bandido_touch(time) || sched_boost() != NO_BOOST;
 }
 
+/*
+ * Something is drawing: a UI/render thread ran on any CPU recently, or the
+ * user is interacting. Animations and video with no touch count too.
+ */
+static inline bool bandido_drawing(u64 time)
+{
+#ifdef CONFIG_BANDIDO_UI_BOOST
+	if (bandido_ui_drawing(time))
+		return true;
+#endif
+	return bandido_interaction(time);
+}
+
 #ifdef CONFIG_BANDIDO_UI_BOOST
 static inline bool sugov_ui_active(struct sugov_cpu *sg_cpu, u64 time)
 {
@@ -223,17 +236,15 @@ static inline bool sugov_ui_active(struct sugov_cpu *sg_cpu, u64 time)
 
 	if (has_ui) {
 		sg_cpu->last_ui_time = time;
+		bandido_ui_seen(time);
 		return true;
 	}
 
 	/*
-	 * If the display is at high refresh rate (120Hz), hold the boost
-	 * across inter-frame VSYNC sleeps for up to 32ms (~4 frames)
-	 * during active user interaction (touch/scroll).
-	 * If the screen is at 60Hz or idle/passive, do not extend boost.
+	 * Hold the boost across inter-frame VSYNC sleeps for up to 32ms
+	 * (~2 frames at 60Hz, ~4 at 120Hz) so the next frame starts fast.
 	 */
-	if (bandido_interaction(time) && display_is_120hz() && sg_cpu->last_ui_time &&
-	    (time - sg_cpu->last_ui_time < 32000000ULL))
+	if (sg_cpu->last_ui_time && (time - sg_cpu->last_ui_time < 32000000ULL))
 		return true;
 
 	return false;
@@ -253,7 +264,7 @@ static void sugov_walt_adjust(struct sugov_cpu *sg_cpu, unsigned long *util,
 	bool boost_active = sugov_rtg_boost_active(sg_cpu) || sugov_ui_active(sg_cpu, time);
 
 	if (boost_active) {
-		if (sg_policy->policy->cpu == 0 || bandido_interaction(time))
+		if (sg_policy->policy->cpu == 0 || bandido_drawing(time))
 			*util = max(*util, sg_policy->rtg_boost_util);
 	}
 #endif
@@ -275,7 +286,7 @@ static inline unsigned long sugov_apply_dvfs_headroom(unsigned long util,
 	return capped_util + headroom;
 }
 
-/* Above this load, headroom drops to 1/16 when the user is not interacting */
+/* Above this load, headroom drops to 1/16 when nothing is drawing */
 #define BANDIDO_TARGET_LOAD	60
 
 static void sugov_build_dvfs_headroom_lut(struct sugov_policy *sg_policy)
@@ -299,18 +310,18 @@ static void sugov_build_dvfs_headroom_lut(struct sugov_policy *sg_policy)
 
 static unsigned long bandido_map_util_freq(unsigned long util,
 					unsigned long freq, unsigned long cap,
-					struct sugov_cpu *sg_cpu, bool interaction)
+					struct sugov_cpu *sg_cpu, bool drawing)
 {
 	unsigned long thresh;
 
-	if (interaction) {
+	if (drawing) {
 		if (sg_cpu->dvfs_headroom_lut)
 			util = sg_cpu->dvfs_headroom_lut[min_t(unsigned long, util, SCHED_CAPACITY_SCALE)];
 
 		return (freq + (freq >> 2)) * util / cap;
 	}
 
-	/* waltgov target_load: taper headroom near fmax when nobody is looking */
+	/* waltgov target_load: taper headroom near fmax when nothing is drawing */
 	thresh = sg_cpu->sg_policy->target_load_thresh;
 	if (util >= thresh)
 		return max((freq + (freq >> 4)) * util,
@@ -327,7 +338,7 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 				policy->cpuinfo.max_freq : policy->cur;
 
 	freq = bandido_map_util_freq(util, freq, max, &per_cpu(sugov_cpu, policy->cpu),
-				     bandido_interaction(time));
+				     bandido_drawing(time));
 #ifdef CONFIG_CPU_BOOST
 	if (bandido_touch(time))
 		freq = max(freq, cpuboost_input_freq(policy->cpu));
@@ -611,8 +622,9 @@ static ssize_t boost_status_show(struct gov_attr_set *attr_set, char *buf)
 	u64 now = ktime_get_ns();
 
 	count += scnprintf(buf + count, PAGE_SIZE - count,
-			   "touch=%d interaction=%d sched_boost=%d\n",
-			   bandido_touch(now), bandido_interaction(now), sched_boost());
+			   "touch=%d interaction=%d drawing=%d sched_boost=%d\n",
+			   bandido_touch(now), bandido_interaction(now),
+			   bandido_drawing(now), sched_boost());
 
 	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook) {
 		struct cpufreq_policy *policy = sg_policy->policy;

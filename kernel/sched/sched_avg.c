@@ -37,17 +37,23 @@ static DEFINE_PER_CPU(u64, hyst_time);
 
 /*
  * Busy hysteresis keeps gold/prime out of deep idle right after they were
- * busy. Apply it only while the user interacts (touch window or sched_boost)
- * instead of whatever the ROM writes to sched_busy_hyst_ns, which on some
- * ROMs holds it on permanently.
+ * busy. Apply it only while something is drawing (a UI/render thread ran
+ * recently, touch window or sched_boost) instead of whatever the ROM writes
+ * to sched_busy_hyst_ns, which on some ROMs holds it on permanently.
  */
 #define BUSY_HYST_CPUS		0xF0
 #define BUSY_HYST_NS		(5 * NSEC_PER_MSEC)
 
-static inline bool busy_hyst_interaction(bool is_sched_boost)
+static inline bool busy_hyst_drawing(bool is_sched_boost)
 {
+	u64 now = sched_ktime_clock();
+
+#ifdef CONFIG_BANDIDO_UI_BOOST
+	if (bandido_ui_drawing(now))
+		return true;
+#endif
 #ifdef CONFIG_CPU_BOOST
-	if (sched_ktime_clock() < READ_ONCE(cpuboost_input_until_ns))
+	if (now < READ_ONCE(cpuboost_input_until_ns))
 		return true;
 #endif
 	return is_sched_boost;
@@ -170,7 +176,7 @@ static inline void update_busy_hyst_end_time(int cpu, bool dequeue,
 	if (!(nr_run_trigger || load_trigger || is_sched_boost))
 		return;
 
-	if ((BIT(cpu) & BUSY_HYST_CPUS) && busy_hyst_interaction(is_sched_boost))
+	if ((BIT(cpu) & BUSY_HYST_CPUS) && busy_hyst_drawing(is_sched_boost))
 		hyst = max_t(u64, hyst, BUSY_HYST_NS);
 
 	if (hyst)

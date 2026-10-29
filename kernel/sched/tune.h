@@ -38,6 +38,12 @@ static inline bool is_ui_thread_name(struct task_struct *p)
 		return true;
 	if (c == 'I' && (!strcmp(comm, "InsetsAnimation") || !strcmp(comm, "InteractionJank")))
 		return true;
+	/* SurfaceFlinger composes every frame, including video with no app redraw */
+	if (c == 's' && !strcmp(comm, "surfaceflinger"))
+		return true;
+	/* SDE display commit / frame_done kthreads (crtc_commit:N, crtc_event:N) */
+	if (c == 'c' && !strncmp(comm, "crtc_", 5))
+		return true;
 
 	return false;
 }

@@ -2085,6 +2085,25 @@ static inline u64 sched_ktime_clock(void)
 }
 #endif
 
+#ifdef CONFIG_BANDIDO_UI_BOOST
+/* sched_ktime_clock() of the last time a UI/render thread ran on any CPU */
+extern u64 bandido_ui_seen_ns;
+
+/* Covers a 24fps video frame interval plus scheduling jitter */
+#define BANDIDO_DRAW_HOLD_NS	(64 * NSEC_PER_MSEC)
+
+static inline void bandido_ui_seen(u64 now)
+{
+	if ((s64)(now - READ_ONCE(bandido_ui_seen_ns)) > NSEC_PER_MSEC)
+		WRITE_ONCE(bandido_ui_seen_ns, now);
+}
+
+static inline bool bandido_ui_drawing(u64 now)
+{
+	return (s64)(now - READ_ONCE(bandido_ui_seen_ns)) < BANDIDO_DRAW_HOLD_NS;
+}
+#endif
+
 #ifndef arch_scale_freq_capacity
 static __always_inline
 unsigned long arch_scale_freq_capacity(int cpu)
