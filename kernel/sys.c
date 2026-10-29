@@ -198,9 +198,6 @@ static int set_one_prio(struct task_struct *p, int niceval, int error)
 	}
 	if (error == -ESRCH)
 		error = 0;
-	if (niceval < 0 && __kuid_val(task_uid(p)) >= 10000)
-		niceval = 0;
-
 	set_user_nice(p, niceval);
 out:
 	return error;
