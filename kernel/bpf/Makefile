@@ -11,6 +11,9 @@ obj-$(CONFIG_BPF_SYSCALL) += hashtab.o arraymap.o percpu_freelist.o bpf_lru_list
 obj-$(CONFIG_BPF_SYSCALL) += local_storage.o queue_stack_maps.o ringbuf.o
 obj-${CONFIG_BPF_LSM}	  += bpf_inode_storage.o
 obj-$(CONFIG_BPF_SYSCALL) += disasm.o
+ifneq ($(CONFIG_BPF_EVENTS),y)
+obj-$(CONFIG_BPF_SYSCALL) += tp_stub.o
+endif
 obj-$(CONFIG_BPF_JIT) += trampoline.o
 obj-$(CONFIG_BPF_SYSCALL) += btf.o
 obj-$(CONFIG_BPF_JIT) += dispatcher.o
