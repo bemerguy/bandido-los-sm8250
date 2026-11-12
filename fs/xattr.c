@@ -366,6 +366,12 @@ vfs_getxattr(struct dentry *dentry, const char *name, void *value, size_t size)
 	if (error)
 		return error;
 
+#ifdef CONFIG_NOMOUNT
+	{ extern bool nm_inode_hidden_from_caller(const struct inode *);
+	  if (nm_inode_hidden_from_caller(inode))
+		  return -ENOENT; }
+#endif
+
 	if (!strncmp(name, XATTR_SECURITY_PREFIX,
 				XATTR_SECURITY_PREFIX_LEN)) {
 		const char *suffix = name + XATTR_SECURITY_PREFIX_LEN;

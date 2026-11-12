@@ -427,6 +427,11 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 		dev = inode->i_sb->s_dev;
 		ino = inode->i_ino;
+#ifdef CONFIG_NOMOUNT
+		{ extern void vfs_map_meta_override(const struct inode *,
+						  dev_t *, unsigned long *);
+		  vfs_map_meta_override(inode, &dev, &ino); }
+#endif
 		pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 		susfs_sus_kstat_spoof_show_map_vma(inode, &dev, &ino);
