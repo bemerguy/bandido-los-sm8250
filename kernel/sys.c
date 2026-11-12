@@ -1257,6 +1257,11 @@ SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 
 	down_read(&uts_sem);
 	memcpy(&tmp, utsname(), sizeof(tmp));
+	up_read(&uts_sem);
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+	if (static_branch_likely(&susfs_is_uname_spoof_buffer_set))
+		susfs_spoof_uname(&tmp);
+#endif
 #ifndef CONFIG_FAKE_UNAME_NONE
 	if (!strncmp(current->comm, "bpfloader", 9) ||
 	    !strncmp(current->comm, "netbpfload", 10) ||
@@ -1280,11 +1285,6 @@ SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 				 current->comm, current->pid, tmp.release);
 		}
 	}
-#endif
-	up_read(&uts_sem);
-#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
-	if (static_branch_likely(&susfs_is_uname_spoof_buffer_set))
-		susfs_spoof_uname(&tmp);
 #endif
 	if (copy_to_user(name, &tmp, sizeof(tmp)))
 		return -EFAULT;
